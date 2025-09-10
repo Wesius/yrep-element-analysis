@@ -303,14 +303,20 @@ class SpectrumVisualizer:
         axes[1, 0].legend()
         axes[1, 0].grid(True, alpha=0.3)
 
-        # Before vs After
+        # Before vs After (use twin y-axes so "After" is visible on normalized scale)
         axes[1, 1].set_title("Before vs After", fontweight="bold")
-        axes[1, 1].plot(wl_grid, y_sub, "b-", alpha=0.7, label="Before")
-        axes[1, 1].plot(wl_grid, y_cr, "g-", linewidth=2, label="After")
-        axes[1, 1].set_xlabel("Wavelength (nm)")
-        axes[1, 1].set_ylabel("Intensity")
-        axes[1, 1].legend()
-        axes[1, 1].grid(True, alpha=0.3)
+        ax_before = axes[1, 1]
+        ax_after = ax_before.twinx()
+        line_before, = ax_before.plot(wl_grid, y_sub, "b-", alpha=0.7, label="Before")
+        line_after, = ax_after.plot(wl_grid, y_cr, "g-", linewidth=2, label="After")
+        ax_before.set_xlabel("Wavelength (nm)")
+        ax_before.set_ylabel("Intensity")
+        ax_after.set_ylabel("Normalized Intensity")
+        ax_before.grid(True, alpha=0.3)
+        # Combined legend
+        lines = [line_before, line_after]
+        labels = [line.get_label() for line in lines]
+        ax_before.legend(lines, labels, loc="best")
 
         self._save_and_show(fig, self._get_next_filename("continuum_removal"), title)
 
