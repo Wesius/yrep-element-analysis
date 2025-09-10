@@ -8,7 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
-data/
 standards/
 .DS_Store
 debug_plots/
