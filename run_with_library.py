@@ -51,7 +51,7 @@ def main() -> None:
     lists_dir = base / "data" / "lists"
     refs = load_references(lists_dir)
 
-    for std in ["Copper", "StandardA"]: #     for std in ["StandardA", "StandardB", "StandardC", "StandardD"]:
+    for std in ["Copper", "StandardA", "StandardB", "StandardC", "StandardD"]: #     for std in ["StandardA", "StandardB", "StandardC", "StandardD"]:
         print(f"\nProcessing {std}...")
         std_dir = base / "data" / "StandardsTest" / std
         meas_root = (
@@ -60,12 +60,6 @@ def main() -> None:
             else (std_dir / ("StdB" if std == "StandardB" else std))
         )
         
-        # Determine measurement root; Copper files are directly under std_dir
-        if not meas_root.exists():
-            if std == "StandardB" and (std_dir / "StdB").exists():
-                meas_root = std_dir / "StdB"
-            elif any(std_dir.glob("*.txt")):
-                meas_root = std_dir
         bg_root = std_dir / "BG"
         meas, bg = load_batch(meas_root, bg_root)
         groups = group_spectra(meas)
