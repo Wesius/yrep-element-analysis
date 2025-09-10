@@ -38,7 +38,10 @@ class Instrument:
 
 
 # Optional user overrides (advanced), each receives arrays and returns arrays
-BackgroundFn = Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Instrument], Tuple[np.ndarray, Dict[str, float]]]
+BackgroundFn = Callable[
+    [np.ndarray, np.ndarray, np.ndarray, np.ndarray, Instrument],
+    Tuple[np.ndarray, Dict[str, float]],
+]
 ContinuumFn = Callable[[np.ndarray, np.ndarray, float], Tuple[np.ndarray, np.ndarray]]
 
 
@@ -59,11 +62,17 @@ class AnalysisConfig:
     return_arrays: bool = True
 
     # Preprocessing trims
-    min_wavelength_nm: Optional[float] = None  # drop data below this wavelength if provided
-    auto_trim_left: bool = False  # if True and min_wavelength_nm is None, auto-trim steep left spike
+    min_wavelength_nm: Optional[float] = (
+        None  # drop data below this wavelength if provided
+    )
+    auto_trim_left: bool = (
+        False  # if True and min_wavelength_nm is None, auto-trim steep left spike
+    )
 
     # Background handling
-    align_background: bool = False  # if True, register (shift) background before subtraction
+    align_background: bool = (
+        False  # if True, register (shift) background before subtraction
+    )
 
     # Optional advanced overrides
     background_fn: Optional[BackgroundFn] = None
@@ -99,5 +108,3 @@ class AnalysisResult:
     detections: List[Dict[str, Union[str, float, int]]]
     detection: DetectionResult
     metrics: Dict[str, Union[float, Dict[str, float]]]
-
-

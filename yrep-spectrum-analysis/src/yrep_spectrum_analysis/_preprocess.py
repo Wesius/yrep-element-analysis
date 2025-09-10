@@ -4,7 +4,7 @@ from typing import List, Optional, Sequence, Tuple
 import numpy as np
 from pybaselines import Baseline
 from skimage.registration import phase_cross_correlation
- 
+
 
 from .types import AnalysisConfig, Instrument, PreprocessResult, Spectrum, SpectrumLike
 
@@ -18,14 +18,20 @@ def _as_arrays(items: Sequence[SpectrumLike]) -> List[Spectrum]:
     return out
 
 
-def _uniform_grid_from_data(wavelength_nm: np.ndarray, instr: Instrument, n_min: int = 1000) -> np.ndarray:
+def _uniform_grid_from_data(
+    wavelength_nm: np.ndarray, instr: Instrument, n_min: int = 1000
+) -> np.ndarray:
     wl_min = float(np.min(wavelength_nm))
     wl_max = float(np.max(wavelength_nm))
     if instr.grid_step_nm and instr.grid_step_nm > 0:
         step = float(instr.grid_step_nm)
     else:
         diffs = np.diff(wavelength_nm)
-        step = float(np.median(diffs[diffs > 0])) if diffs.size else (wl_max - wl_min) / float(n_min)
+        step = (
+            float(np.median(diffs[diffs > 0]))
+            if diffs.size
+            else (wl_max - wl_min) / float(n_min)
+        )
         if not np.isfinite(step) or step <= 0:
             step = (wl_max - wl_min) / float(n_min)
     approx_n = int(np.ceil((wl_max - wl_min) / step))
@@ -34,7 +40,9 @@ def _uniform_grid_from_data(wavelength_nm: np.ndarray, instr: Instrument, n_min:
     return np.arange(wl_min, wl_max, step)
 
 
-def _continuum_remove(wl: np.ndarray, y: np.ndarray, strength: float, override_fn=None) -> Tuple[np.ndarray, np.ndarray]:
+def _continuum_remove(
+    wl: np.ndarray, y: np.ndarray, strength: float, override_fn=None
+) -> Tuple[np.ndarray, np.ndarray]:
     if override_fn is not None:
         y_cr, baseline = override_fn(wl, y, strength)
         return np.asarray(y_cr, dtype=float), np.asarray(baseline, dtype=float)
@@ -69,11 +77,17 @@ def _register_and_subtract(
     shift_samples = float(np.ravel(shifts)[0])
     step_nm = (wl[-1] - wl[0]) / max(1, wl.size - 1)
     shift_nm = shift_samples * step_nm
-    bg_shifted = np.interp(wl, wl - shift_nm, bg_y, left=float(bg_y[0]), right=float(bg_y[-1]))
+    bg_shifted = np.interp(
+        wl, wl - shift_nm, bg_y, left=float(bg_y[0]), right=float(bg_y[-1])
+    )
 
     # Pure registration: subtract shifted background without scaling/offset
     sub = std_y - bg_shifted
-    return sub.astype(float), {"bg_shift_nm": shift_nm, "bg_scale_a": 1.0, "bg_offset_b": 0.0}
+    return sub.astype(float), {
+        "bg_shift_nm": shift_nm,
+        "bg_scale_a": 1.0,
+        "bg_offset_b": 0.0,
+    }
 
 
 def preprocess(
@@ -85,7 +99,9 @@ def preprocess(
     bg = _as_arrays(backgrounds) if backgrounds else []
 
     # Optional left-trim to remove steep spike region
-    if getattr(config, "min_wavelength_nm", None) is not None or getattr(config, "auto_trim_left", False):
+    if getattr(config, "min_wavelength_nm", None) is not None or getattr(
+        config, "auto_trim_left", False
+    ):
         if getattr(config, "min_wavelength_nm", None) is not None:
             wl_min_keep = float(config.min_wavelength_nm)
         else:
@@ -105,16 +121,22 @@ def preprocess(
                     wl_min_keep += float(np.median(dw))
             except Exception:
                 wl_min_keep = float(meas[0].wavelength[0])
+
         def _trim(spec: Spectrum) -> Spectrum:
             mask = np.asarray(spec.wavelength >= wl_min_keep, dtype=bool)
             if not np.any(mask):
                 return spec
-            return Spectrum(wavelength=spec.wavelength[mask], intensity=spec.intensity[mask])
+            return Spectrum(
+                wavelength=spec.wavelength[mask], intensity=spec.intensity[mask]
+            )
+
         meas = [_trim(s) for s in meas]
         bg = [_trim(s) for s in bg] if bg else []
 
     # Average measurement and background on overlap grid
-    def _average_spectra(specs: List[Spectrum], n_points: Optional[int] = None) -> Spectrum:
+    def _average_spectra(
+        specs: List[Spectrum], n_points: Optional[int] = None
+    ) -> Spectrum:
         if len(specs) == 1:
             return specs[0]
         all_wl = [s.wavelength for s in specs]
@@ -128,23 +150,56 @@ def preprocess(
         avg = np.mean(np.stack(intens, axis=0), axis=0)
         return Spectrum(wavelength=wl_common, intensity=avg)
 
-    avg_meas = _average_spectra(meas, n_points=max(config.instrument.__dict__.get("average_n_points", 1000), 1000)) if len(meas) > 1 else meas[0]
-    avg_bg = _average_spectra(bg, n_points=max(config.instrument.__dict__.get("average_n_points", 1000), 1000)) if bg else None
+    avg_meas = (
+        _average_spectra(
+            meas,
+            n_points=max(
+                config.instrument.__dict__.get("average_n_points", 1000), 1000
+            ),
+        )
+        if len(meas) > 1
+        else meas[0]
+    )
+    avg_bg = (
+        _average_spectra(
+            bg,
+            n_points=max(
+                config.instrument.__dict__.get("average_n_points", 1000), 1000
+            ),
+        )
+        if bg
+        else None
+    )
 
     # Grid: restrict to measurement–background overlap to avoid edge artifacts
     if avg_bg is not None:
-        wl_min_common = max(float(np.min(avg_meas.wavelength)), float(np.min(avg_bg.wavelength)))
-        wl_max_common = min(float(np.max(avg_meas.wavelength)), float(np.max(avg_bg.wavelength)))
+        wl_min_common = max(
+            float(np.min(avg_meas.wavelength)), float(np.min(avg_bg.wavelength))
+        )
+        wl_max_common = min(
+            float(np.max(avg_meas.wavelength)), float(np.max(avg_bg.wavelength))
+        )
         if wl_max_common > wl_min_common:
-            meas_wl_for_grid = avg_meas.wavelength[(avg_meas.wavelength >= wl_min_common) & (avg_meas.wavelength <= wl_max_common)]
-            wl_src = meas_wl_for_grid if meas_wl_for_grid.size >= 2 else avg_meas.wavelength
+            meas_wl_for_grid = avg_meas.wavelength[
+                (avg_meas.wavelength >= wl_min_common)
+                & (avg_meas.wavelength <= wl_max_common)
+            ]
+            wl_src = (
+                meas_wl_for_grid if meas_wl_for_grid.size >= 2 else avg_meas.wavelength
+            )
         else:
             wl_src = avg_meas.wavelength
     else:
         wl_src = avg_meas.wavelength
     wl_grid = _uniform_grid_from_data(wl_src, config.instrument, n_min=1000)
-    y_meas = np.asarray(np.interp(wl_grid, avg_meas.wavelength, avg_meas.intensity), dtype=float)
-    y_bg = np.asarray(np.interp(wl_grid, avg_bg.wavelength, avg_bg.intensity), dtype=float) if avg_bg is not None else None
+    y_meas = np.asarray(
+        np.interp(wl_grid, avg_meas.wavelength, avg_meas.intensity), dtype=float
+    )
+    y_bg = (
+        np.asarray(np.interp(wl_grid, avg_bg.wavelength, avg_bg.intensity), dtype=float)
+        if avg_bg is not None
+        else None
+    )
     # Zero-pad tails to avoid large negative edge subtraction
     if y_bg is not None and avg_bg is not None:
         left_mask = wl_grid < float(np.min(avg_bg.wavelength))
@@ -158,16 +213,33 @@ def preprocess(
     if y_bg is not None:
         if getattr(config, "align_background", False):
             # Explicitly align if requested
-            y_sub, _ = _register_and_subtract(wl_grid, y_meas, y_bg, config.instrument, override_fn=config.background_fn)
+            y_sub, _ = _register_and_subtract(
+                wl_grid,
+                y_meas,
+                y_bg,
+                config.instrument,
+                override_fn=config.background_fn,
+            )
         else:
-            y_sub, _ = (y_meas - y_bg).astype(float), {"bg_shift_nm": 0.0, "bg_scale_a": 1.0, "bg_offset_b": 0.0}
+            y_sub, _ = (
+                (y_meas - y_bg).astype(float),
+                {"bg_shift_nm": 0.0, "bg_scale_a": 1.0, "bg_offset_b": 0.0},
+            )
     else:
-        y_sub, _ = y_meas.astype(float), {"bg_shift_nm": 0.0, "bg_scale_a": 0.0, "bg_offset_b": 0.0}
+        y_sub, _ = (
+            y_meas.astype(float),
+            {"bg_shift_nm": 0.0, "bg_scale_a": 0.0, "bg_offset_b": 0.0},
+        )
 
     # Enforce non-negativity on background-subtracted signal BEFORE continuum
     y_sub = np.maximum(y_sub, 0.0)
     # Continuum on non-negative signal
-    y_cr, baseline = _continuum_remove(wl_grid, y_sub, strength=float(config.baseline_strength), override_fn=config.continuum_fn)
+    y_cr, baseline = _continuum_remove(
+        wl_grid,
+        y_sub,
+        strength=float(config.baseline_strength),
+        override_fn=config.continuum_fn,
+    )
 
     # Final non-negativity
     y_cr = np.maximum(y_cr, 0.0)
@@ -182,5 +254,3 @@ def preprocess(
         avg_meas=(avg_meas.wavelength, avg_meas.intensity),
         avg_bg=(avg_bg.wavelength, avg_bg.intensity) if avg_bg is not None else None,
     )
-
-

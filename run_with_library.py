@@ -9,12 +9,10 @@ This is a demonstration of simplicity: no file writes, no plotting.
 from __future__ import annotations
 
 from pathlib import Path
-import sys
 
 
 from yrep_spectrum_analysis import AnalysisConfig, analyze, Instrument
 from yrep_spectrum_analysis.utils import load_batch, load_references, group_spectra
-
 
 
 def main() -> None:
@@ -25,25 +23,59 @@ def main() -> None:
     cfg = AnalysisConfig(
         instrument=Instrument(
             fwhm_nm=2,
-            max_shift_nm=0.6   # Used with shift search
+            max_shift_nm=0.6,  # Used with shift search
         ),
-        mode="accurate",          # Uses registration + robust scale for background
-        sensitivity="high",        # Raises presence threshold to ~0.05
-        min_bands_required=2,     # Makes single-line "hits" fail
-        presence_threshold=0.001,        # explicit, stricter than "low"; 0.08–0.12 is sensible here
+        mode="accurate",  # Uses registration + robust scale for background
+        sensitivity="high",  # Raises presence threshold to ~0.05
+        min_bands_required=2,  # Makes single-line "hits" fail
+        presence_threshold=0.001,  # explicit, stricter than "low"; 0.08–0.12 is sensible here
         auto_trim_left=True,
         align_background=False,
         top_k=3,
-        species=["Na","K","Ca","Li","Cu","Ba","Sr","Hg","O","N",
-        "Al","Mg","Si","Zn","Pb","Cd","Ag","Au","Cr","Mn",
-        "Co","Ni","Ti","Sn","Sb","As","Se","C","B","Fe","H","Ar"]
+        species=[
+            "Na",
+            "K",
+            "Ca",
+            "Li",
+            "Cu",
+            "Ba",
+            "Sr",
+            "Hg",
+            "O",
+            "N",
+            "Al",
+            "Mg",
+            "Si",
+            "Zn",
+            "Pb",
+            "Cd",
+            "Ag",
+            "Au",
+            "Cr",
+            "Mn",
+            "Co",
+            "Ni",
+            "Ti",
+            "Sn",
+            "Sb",
+            "As",
+            "Se",
+            "C",
+            "B",
+            "Fe",
+            "H",
+            "Ar",
+        ],
     )
-
 
     for std in ["StandardA"]:
         print(f"\nProcessing {std}...")
         std_dir = base / "data" / "StandardsTest" / std
-        meas_root = (std_dir / std) if (std_dir / std).exists() else (std_dir / ("StdB" if std == "StandardB" else std))
+        meas_root = (
+            (std_dir / std)
+            if (std_dir / std).exists()
+            else (std_dir / ("StdB" if std == "StandardB" else std))
+        )
         bg_root = std_dir / "BG"
         meas, bg = load_batch(meas_root, bg_root)
         groups = group_spectra(meas)
@@ -63,7 +95,7 @@ def main() -> None:
                 viz_show=False,
             )
 
-            r2 = float(result.metrics.get('fit_R2', 0.0))
+            r2 = float(result.metrics.get("fit_R2", 0.0))
             print(f"   Group {gi}: R²={r2:.4f}; detections={len(result.detections)}")
             if result.detections:
                 print("      Detections:")
@@ -78,5 +110,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

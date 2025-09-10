@@ -35,7 +35,9 @@ def group_spectra(measurements: Sequence[SpectrumLike]) -> List[List[Spectrum]]:
     grid = np.linspace(wl_min, wl_max, 1000)
 
     # Interpolate to common grid
-    vectors: List[np.ndarray] = [np.interp(grid, s.wavelength, s.intensity).astype(float) for s in specs]
+    vectors: List[np.ndarray] = [
+        np.interp(grid, s.wavelength, s.intensity).astype(float) for s in specs
+    ]
     avg = np.mean(np.stack(vectors, axis=0), axis=0)
 
     def _cosine(u: np.ndarray, v: np.ndarray) -> float:
@@ -81,6 +83,7 @@ def group_spectra(measurements: Sequence[SpectrumLike]) -> List[List[Spectrum]]:
 # -------------------------
 # Data loading utilities
 # -------------------------
+
 
 def load_txt_spectrum(path: Path) -> Tuple[np.ndarray, np.ndarray]:
     wl: List[float] = []
@@ -146,7 +149,14 @@ def load_references(lists_dir: Path) -> pd.DataFrame:
     for c in csvs:
         df = pd.read_csv(c)
         wl_col = None
-        for cand in ["Wavelength (Å)", "Wavelength (A)", "Wavelength_A", "Wavelength_Angstrom", "Wavelength (nm)", "Wavelength_nm"]:
+        for cand in [
+            "Wavelength (Å)",
+            "Wavelength (A)",
+            "Wavelength_A",
+            "Wavelength_Angstrom",
+            "Wavelength (nm)",
+            "Wavelength_nm",
+        ]:
             if cand in df.columns:
                 wl_col = cand
                 break
@@ -162,15 +172,22 @@ def load_references(lists_dir: Path) -> pd.DataFrame:
                 break
         if not (wl_col and spec_col and inten_col):
             continue
-        wl_nm = (pd.to_numeric(df[wl_col], errors="coerce") / 10.0) if "nm" not in wl_col else pd.to_numeric(df[wl_col], errors="coerce")
-        frame = pd.DataFrame({
-            "wavelength_nm": wl_nm,
-            "species": df[spec_col].astype(str),
-            "intensity": df[inten_col].astype(str).str.extract(r"^\s*([0-9]+(?:\.[0-9]+)?)")[0].astype(float),
-        }).dropna()
+        wl_nm = (
+            (pd.to_numeric(df[wl_col], errors="coerce") / 10.0)
+            if "nm" not in wl_col
+            else pd.to_numeric(df[wl_col], errors="coerce")
+        )
+        frame = pd.DataFrame(
+            {
+                "wavelength_nm": wl_nm,
+                "species": df[spec_col].astype(str),
+                "intensity": df[inten_col]
+                .astype(str)
+                .str.extract(r"^\s*([0-9]+(?:\.[0-9]+)?)")[0]
+                .astype(float),
+            }
+        ).dropna()
         frames.append(frame)
     if not frames:
         raise RuntimeError("No reference lines parsed")
     return pd.concat(frames, ignore_index=True)
-
-

@@ -2,18 +2,30 @@ from __future__ import annotations
 
 from typing import Optional, Sequence
 
-from .types import AnalysisConfig, AnalysisResult, DetectionResult, PreprocessResult, SpectrumLike
+from .types import (
+    AnalysisConfig,
+    AnalysisResult,
+    DetectionResult,
+    PreprocessResult,
+    SpectrumLike,
+)
 from ._preprocess import preprocess as _preprocess_impl
 from ._templates import build_bands_index, build_templates, normalize_reference
 from ._detect import nnls_detect
 from ._visualize import SpectrumVisualizer
 
 
-def preprocess(measurements: Sequence[SpectrumLike], backgrounds: Optional[Sequence[SpectrumLike]], config: AnalysisConfig) -> PreprocessResult:
+def preprocess(
+    measurements: Sequence[SpectrumLike],
+    backgrounds: Optional[Sequence[SpectrumLike]],
+    config: AnalysisConfig,
+) -> PreprocessResult:
     return _preprocess_impl(measurements, backgrounds, config)
 
 
-def detect(preprocessed: PreprocessResult, references, config: AnalysisConfig) -> DetectionResult:
+def detect(
+    preprocessed: PreprocessResult, references, config: AnalysisConfig
+) -> DetectionResult:
     ref = normalize_reference(references)
     S, names = build_templates(
         ref,
@@ -68,8 +80,6 @@ def analyze(
         species_filter=cfg.species,
     )
     bands = build_bands_index(ref, names, instrument=cfg.instrument)
-
-    
 
     coeffs, y_fit, present, per_species_scores, R2 = nnls_detect(
         pre.wl_grid, pre.y_cr, S, names, bands=bands, config=cfg

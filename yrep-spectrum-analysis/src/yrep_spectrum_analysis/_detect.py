@@ -25,12 +25,17 @@ def _search_best_shift(
     step_factor: float = 1.0,
 ) -> Tuple[float, np.ndarray]:
     """Grid-search a small wavelength shift that maximizes R^2 of a quick NNLS fit."""
-    if not np.isfinite(config.instrument.max_shift_nm) or config.instrument.max_shift_nm <= 0:
+    if (
+        not np.isfinite(config.instrument.max_shift_nm)
+        or config.instrument.max_shift_nm <= 0
+    ):
         return 0.0, y_cr
     # step equals grid step × step_factor
     step_nm = (wl_grid_nm[-1] - wl_grid_nm[0]) / max(1, wl_grid_nm.size - 1)
     step_nm = max(step_nm * step_factor, step_nm)
-    shifts = np.arange(-config.instrument.max_shift_nm, config.instrument.max_shift_nm + 1e-12, step_nm)
+    shifts = np.arange(
+        -config.instrument.max_shift_nm, config.instrument.max_shift_nm + 1e-12, step_nm
+    )
     best_R2, best_shift, best_y = -np.inf, 0.0, y_cr
     # lightweight bounded LS to evaluate candidates
     for s in shifts:
@@ -43,7 +48,7 @@ def _search_best_shift(
         sol = lsq_linear(S_aug, y_aug, bounds=(0.0, np.inf), method="trf")
         y_fit = S_templates @ np.asarray(sol.x, dtype=float)
         ss_res = float(np.sum((y_s - y_fit) ** 2))
-        ss_tot = float(np.sum(y_s ** 2) + 1e-12)
+        ss_tot = float(np.sum(y_s**2) + 1e-12)
         R2 = 1.0 - ss_res / ss_tot
         if R2 > best_R2:
             best_R2, best_shift, best_y = R2, s, y_s
@@ -96,7 +101,7 @@ def nnls_detect(
 
     # R2
     ss_res = float(np.sum((y - y_fit) ** 2))
-    ss_tot = float(np.sum(y ** 2) + 1e-12)
+    ss_tot = float(np.sum(y**2) + 1e-12)
     R2 = 1.0 - ss_res / ss_tot
 
     # Leave-one-out FVE per species
@@ -117,20 +122,27 @@ def nnls_detect(
             return 0
         sp = species_names[i]
         hit = 0
-        for (a, b) in bands.get(sp, []):
+        for a, b in bands.get(sp, []):
             mask = (wl_grid_nm >= a) & (wl_grid_nm <= b)
             if not np.any(mask):
                 continue
             band_tot = float(np.sum(y[mask] ** 2) + 1e-12)
             y_fit_with = y_fit[mask]
             y_fit_wo_b = (y_fit - S[:, i] * coeffs[i])[mask]
-            band_lift = (float(np.sum((y[mask] - y_fit_wo_b) ** 2)) - float(np.sum((y[mask] - y_fit_with) ** 2))) / band_tot
+            band_lift = (
+                float(np.sum((y[mask] - y_fit_wo_b) ** 2))
+                - float(np.sum((y[mask] - y_fit_with) ** 2))
+            ) / band_tot
             if band_lift >= 0.10:
                 hit += 1
         return hit
 
     # Present list
-    thr = cfg.presence_threshold if cfg.presence_threshold is not None else _presence_threshold_from_sensitivity(cfg.sensitivity)
+    thr = (
+        cfg.presence_threshold
+        if cfg.presence_threshold is not None
+        else _presence_threshold_from_sensitivity(cfg.sensitivity)
+    )
     present: List[Dict[str, float | int | str]] = []
     for i, sp in enumerate(species_names):
         if coeffs[i] <= 0:
@@ -139,17 +151,19 @@ def nnls_detect(
         score = fve
         hits = _bands_hit(i)
         if score >= thr and (hits >= cfg.min_bands_required or not bands):
-            present.append({
-                "species": sp,
-                "score": float(score),
-                "fve": float(fve),
-                "coeff": float(coeffs[i]),
-                "bands_hit": int(hits),
-            })
+            present.append(
+                {
+                    "species": sp,
+                    "score": float(score),
+                    "fve": float(fve),
+                    "coeff": float(coeffs[i]),
+                    "bands_hit": int(hits),
+                }
+            )
 
     present.sort(key=lambda d: float(d["score"]), reverse=True)
 
-    per_species_scores = {species_names[i]: float(per_species_fve[i]) for i in range(len(species_names))}
+    per_species_scores = {
+        species_names[i]: float(per_species_fve[i]) for i in range(len(species_names))
+    }
     return coeffs, y_fit, present, per_species_scores, float(R2)
-
-

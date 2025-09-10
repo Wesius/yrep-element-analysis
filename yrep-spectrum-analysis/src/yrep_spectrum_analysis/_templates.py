@@ -19,11 +19,19 @@ def _base(sym: str) -> str:
     return str(sym).strip().split()[0].upper() if sym else ""
 
 
-def normalize_reference(ref: Union["pd.DataFrame", Tuple[Sequence[str], np.ndarray, np.ndarray], Dict[str, Iterable]]) -> RefLines:
+def normalize_reference(
+    ref: Union[
+        "pd.DataFrame",
+        Tuple[Sequence[str], np.ndarray, np.ndarray],
+        Dict[str, Iterable],
+    ],
+) -> RefLines:
     if isinstance(ref, pd.DataFrame):
         df = ref
         if not {"wavelength_nm", "species", "intensity"}.issubset(df.columns):
-            raise ValueError("reference DataFrame must include columns: wavelength_nm, species, intensity")
+            raise ValueError(
+                "reference DataFrame must include columns: wavelength_nm, species, intensity"
+            )
         species = df["species"].astype(str).tolist()
         wl = np.asarray(df["wavelength_nm"].to_numpy(), dtype=float)
         inten = np.asarray(df["intensity"].to_numpy(), dtype=float)
@@ -31,7 +39,11 @@ def normalize_reference(ref: Union["pd.DataFrame", Tuple[Sequence[str], np.ndarr
 
     if isinstance(ref, tuple) and len(ref) == 3:
         species, wl, inten = ref
-        return RefLines(species=list(species), wavelength_nm=np.asarray(wl, dtype=float), intensity=np.asarray(inten, dtype=float))
+        return RefLines(
+            species=list(species),
+            wavelength_nm=np.asarray(wl, dtype=float),
+            intensity=np.asarray(inten, dtype=float),
+        )
 
     if isinstance(ref, dict):
         species = list(ref.get("species", []))
@@ -41,12 +53,19 @@ def normalize_reference(ref: Union["pd.DataFrame", Tuple[Sequence[str], np.ndarr
 
     raise TypeError("Unsupported reference format for normalize_reference")
 
-def build_templates(ref: RefLines, wl_grid_nm: np.ndarray, fwhm_nm: float, *, species_filter: Optional[Sequence[str]] = None) -> Tuple[np.ndarray, List[str]]:
+
+def build_templates(
+    ref: RefLines,
+    wl_grid_nm: np.ndarray,
+    fwhm_nm: float,
+    *,
+    species_filter: Optional[Sequence[str]] = None,
+) -> Tuple[np.ndarray, List[str]]:
     # Build per-species templates via Gaussian broadening
     sigma = float(fwhm_nm) / (2.0 * np.sqrt(2.0 * np.log(2.0)))
     names_all = sorted(set(_base(s) for s in ref.species))
     if species_filter is not None and len(species_filter) > 0:
-        filt = { _base(s) for s in species_filter }
+        filt = {_base(s) for s in species_filter}
         names = [n for n in names_all if n in filt]
     else:
         names = names_all
@@ -63,12 +82,16 @@ def build_templates(ref: RefLines, wl_grid_nm: np.ndarray, fwhm_nm: float, *, sp
         # Use vectorized broadcasting for efficiency
         # tpl += sum_i w_i * exp(-0.5*((x - mu_i)/sigma)^2)
         diffs = (wl_grid_nm[:, None] - lines_wl[None, :]) / sigma
-        tpl = np.exp(-0.5 * (diffs ** 2)) @ lines_w
+        tpl = np.exp(-0.5 * (diffs**2)) @ lines_w
         area = float(np.trapezoid(tpl, wl_grid_nm) + 1e-12)
         if area > 0:
             tpl = tpl / area
         S_cols.append(tpl)
-    S = np.stack(S_cols, axis=1) if S_cols else np.zeros((wl_grid_nm.shape[0], 0), dtype=float)
+    S = (
+        np.stack(S_cols, axis=1)
+        if S_cols
+        else np.zeros((wl_grid_nm.shape[0], 0), dtype=float)
+    )
     return S, names
 
 
@@ -104,7 +127,7 @@ def build_bands_index(
                 score = float(np.sum(inten[start:i]))
                 clusters.append((start, i - 1, score))
                 start = i
-        score = float(np.sum(inten[start:wl.size]))
+        score = float(np.sum(inten[start : wl.size]))
         clusters.append((start, wl.size - 1, score))
         # rank and keep top-K
         clusters.sort(key=lambda t: t[2], reverse=True)
@@ -136,5 +159,3 @@ def build_bands_index(
             merged.append((cur_a, cur_b))
             bands[sp] = merged
     return bands
-
-
