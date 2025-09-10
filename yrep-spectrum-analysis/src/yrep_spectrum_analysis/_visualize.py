@@ -40,12 +40,27 @@ class SpectrumVisualizer:
 
     def _save_and_show(self, fig: plt.Figure, filename: str, title: str = ""):
         """Handle saving and showing plots."""
-        if self.save_plots:
-            filepath = self.output_dir / f"{filename}.png"
-            fig.savefig(filepath, dpi=300, bbox_inches="tight", facecolor="white")
-
+        # Apply title before layout so it is included in saved figures
         if title:
             fig.suptitle(title, fontsize=14, fontweight="bold")
+
+        # Do not force a particular layout engine here. We'll save differently
+        # depending on whether constrained layout is active.
+
+        if self.save_plots:
+            filepath = self.output_dir / f"{filename}.png"
+            is_constrained = False
+            try:
+                is_constrained = bool(fig.get_constrained_layout())
+            except Exception:
+                is_constrained = False
+
+            if is_constrained:
+                # Save normally when constrained layout is active
+                fig.savefig(filepath, dpi=300, facecolor="white")
+            else:
+                # Use tight bounding box when not using constrained layout
+                fig.savefig(filepath, dpi=300, bbox_inches="tight", facecolor="white")
 
         if self.show_plots:
             plt.show()
@@ -99,7 +114,6 @@ class SpectrumVisualizer:
             ax2.legend()
         ax2.grid(True, alpha=0.3)
 
-        plt.tight_layout()
         self._save_and_show(fig, self._get_next_filename("raw_spectra"), title)
 
     def plot_averaged_spectra(
@@ -146,7 +160,6 @@ class SpectrumVisualizer:
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-        plt.tight_layout()
         self._save_and_show(fig, self._get_next_filename("averaged_spectra"), title)
 
     def plot_background_subtraction(
@@ -222,7 +235,9 @@ class SpectrumVisualizer:
 
         axes[0, 1].set_xlabel("Wavelength (nm)")
         axes[0, 1].set_ylabel("Intensity")
-        axes[0, 1].legend()
+        handles, labels = axes[0, 1].get_legend_handles_labels()
+        if labels:
+            axes[0, 1].legend()
         axes[0, 1].grid(True, alpha=0.3)
 
         # Subtracted result
@@ -243,7 +258,6 @@ class SpectrumVisualizer:
         axes[1, 1].legend()
         axes[1, 1].grid(True, alpha=0.3)
 
-        plt.tight_layout()
         self._save_and_show(
             fig, self._get_next_filename("background_subtraction"), title
         )
@@ -298,7 +312,6 @@ class SpectrumVisualizer:
         axes[1, 1].legend()
         axes[1, 1].grid(True, alpha=0.3)
 
-        plt.tight_layout()
         self._save_and_show(fig, self._get_next_filename("continuum_removal"), title)
 
     def plot_reference_lines(
@@ -360,7 +373,6 @@ class SpectrumVisualizer:
         ax.grid(True, alpha=0.25)
         ax.set_ylim(-0.2, y_offset + 0.2)
 
-        plt.tight_layout()
         self._save_and_show(fig, self._get_next_filename("reference_lines"), title)
 
     def plot_templates(
@@ -375,16 +387,17 @@ class SpectrumVisualizer:
         n_cols = min(3, n_species)
         n_rows = (n_species + n_cols - 1) // n_cols
 
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
-        if n_species == 1:
-            axes = [axes]
-        elif n_rows == 1:
-            axes = [axes]
+        fig, axes = plt.subplots(
+            n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows)
+        )
+        # Normalize axes to a flat list for consistent indexing
+        if isinstance(axes, np.ndarray):
+            axes = axes.ravel().tolist()
         else:
-            axes = axes.flatten()
+            axes = [axes]
 
         for i, species in enumerate(species_names):
-            ax = axes[i] if n_species > 1 else axes[0]
+            ax = axes[i]
             template = templates[:, i]
 
             ax.plot(wl_grid, template, linewidth=2, label=species)
@@ -406,11 +419,14 @@ class SpectrumVisualizer:
                     zorder=5,
                 )
 
-        # Hide unused subplots
-        for i in range(n_species, len(axes)):
-            axes[i].set_visible(False)
+        # Remove unused subplots to avoid constrained_layout/tight_layout warnings
+        for j in range(n_species, len(axes)):
+            try:
+                fig.delaxes(axes[j])
+            except Exception:
+                # Fallback if delaxes is unavailable
+                axes[j].remove()
 
-        plt.tight_layout()
         self._save_and_show(fig, self._get_next_filename("templates"), title)
 
     def plot_band_regions(
@@ -476,7 +492,6 @@ class SpectrumVisualizer:
         ax.grid(True, alpha=0.3)
         ax.set_ylim(-0.2, y_offset + 0.2)
 
-        plt.tight_layout()
         self._save_and_show(fig, self._get_next_filename("band_regions"), title)
 
     def plot_wavelength_shift_optimization(
@@ -551,7 +566,6 @@ class SpectrumVisualizer:
         axes[2].set_ylim(0, 1)
         axes[2].axis("off")
 
-        plt.tight_layout()
         self._save_and_show(fig, self._get_next_filename("wavelength_shift"), title)
 
     def plot_nnls_fitting(
@@ -681,7 +695,6 @@ class SpectrumVisualizer:
             ax_contrib.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
             ax_contrib.grid(True, alpha=0.3)
 
-        plt.tight_layout()
         self._save_and_show(fig, self._get_next_filename("nnls_fitting"), title)
 
     def plot_detection_results(
@@ -844,7 +857,6 @@ class SpectrumVisualizer:
             )
             ax_table.set_title("Detection Summary", fontweight="bold")
 
-        plt.tight_layout()
         self._save_and_show(fig, self._get_next_filename("detection_results"), title)
 
     def plot_analysis_summary(
@@ -1017,7 +1029,6 @@ class SpectrumVisualizer:
                     bbox=dict(boxstyle="round", facecolor="yellow", alpha=0.6),
                 )
 
-        plt.tight_layout()
         self._save_and_show(fig, self._get_next_filename("analysis_summary"), title)
 
     def create_processing_flowchart(self, title: str = "Spectrum Analysis Pipeline"):
@@ -1156,7 +1167,6 @@ class SpectrumVisualizer:
             pad=20,
         )
 
-        plt.tight_layout()
         self._save_and_show(fig, self._get_next_filename("processing_flowchart"), title)
 
     def plot_full_analysis(
