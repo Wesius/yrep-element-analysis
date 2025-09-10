@@ -1,6 +1,6 @@
-# YREP Analysis
+# YREP Spectral Analysis
 
-Repo for running spectral analysis on the supplied datasets using the local library.
+Repo for running spectral analysis on various spectrometer outputs.
 
 ## Setup (uv)
 
