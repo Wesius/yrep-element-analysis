@@ -13,3 +13,4 @@ standards/
 .DS_Store
 debug_plots/
 .ruff_cache/
+plots/

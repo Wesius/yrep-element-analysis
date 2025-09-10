@@ -82,7 +82,7 @@ def main() -> None:
         print(f"   Split into {len(groups)} group(s)")
         for gi, group in enumerate(groups, start=1):
             # Create per-group output directory
-            output_dir = base / "debug_plots" / std.lower() / f"group_{gi:02d}"
+            output_dir = base / "plots" / std.lower() / f"group_{gi:02d}"
             output_dir.mkdir(parents=True, exist_ok=True)
 
             result = analyze(
