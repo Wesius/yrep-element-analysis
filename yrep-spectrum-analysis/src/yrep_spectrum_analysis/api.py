@@ -49,7 +49,6 @@ def analyze(
 ) -> AnalysisResult:
     cfg = config or AnalysisConfig()
 
-    # Optional visualization setup
     viz: Optional[SpectrumVisualizer] = None
     if visualize:
         viz = SpectrumVisualizer(

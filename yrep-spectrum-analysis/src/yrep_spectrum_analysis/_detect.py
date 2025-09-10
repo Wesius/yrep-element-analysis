@@ -9,7 +9,10 @@ from .types import AnalysisConfig
 
 def _shift_vector(x: np.ndarray, wl: np.ndarray, shift_nm: float) -> np.ndarray:
     # positive shift_nm moves features to the right
-    return np.interp(wl, wl - shift_nm, x, left=float(x[0]), right=float(x[-1]))
+    return np.asarray(
+        np.interp(wl, wl - shift_nm, x, left=float(x[0]), right=float(x[-1])),
+        dtype=float,
+    )
 
 
 def _search_best_shift(

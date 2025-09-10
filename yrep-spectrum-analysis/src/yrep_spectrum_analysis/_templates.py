@@ -39,6 +39,8 @@ def normalize_reference(ref: Union["pd.DataFrame", Tuple[Sequence[str], np.ndarr
         inten = np.asarray(ref.get("intensity", []), dtype=float)
         return RefLines(species=species, wavelength_nm=wl, intensity=inten)
 
+    raise TypeError("Unsupported reference format for normalize_reference")
+
 def build_templates(ref: RefLines, wl_grid_nm: np.ndarray, fwhm_nm: float, *, species_filter: Optional[Sequence[str]] = None) -> Tuple[np.ndarray, List[str]]:
     # Build per-species templates via Gaussian broadening
     sigma = float(fwhm_nm) / (2.0 * np.sqrt(2.0 * np.log(2.0)))

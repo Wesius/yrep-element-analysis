@@ -143,10 +143,10 @@ def preprocess(
     else:
         wl_src = avg_meas.wavelength
     wl_grid = _uniform_grid_from_data(wl_src, config.instrument, n_min=1000)
-    y_meas = np.interp(wl_grid, avg_meas.wavelength, avg_meas.intensity)
-    y_bg = np.interp(wl_grid, avg_bg.wavelength, avg_bg.intensity) if avg_bg is not None else None
+    y_meas = np.asarray(np.interp(wl_grid, avg_meas.wavelength, avg_meas.intensity), dtype=float)
+    y_bg = np.asarray(np.interp(wl_grid, avg_bg.wavelength, avg_bg.intensity), dtype=float) if avg_bg is not None else None
     # Zero-pad tails to avoid large negative edge subtraction
-    if y_bg is not None:
+    if y_bg is not None and avg_bg is not None:
         left_mask = wl_grid < float(np.min(avg_bg.wavelength))
         right_mask = wl_grid > float(np.max(avg_bg.wavelength))
         if np.any(left_mask):

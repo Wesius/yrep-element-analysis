@@ -104,8 +104,8 @@ class SpectrumVisualizer:
         
         # Show interpolation grid if provided
         if wl_grid is not None:
-            ax.axvline(wl_grid[0], color='gray', linestyle='--', alpha=0.5, label='Grid boundaries')
-            ax.axvline(wl_grid[-1], color='gray', linestyle='--', alpha=0.5)
+            ax.axvline(float(wl_grid[0]), color='gray', linestyle='--', alpha=0.5, label='Grid boundaries')
+            ax.axvline(float(wl_grid[-1]), color='gray', linestyle='--', alpha=0.5)
         
         ax.set_xlabel("Wavelength (nm)")
         ax.set_ylabel("Intensity")
@@ -237,7 +237,8 @@ class SpectrumVisualizer:
         species_list = sorted(list(species_set))[:12]  # cap for readability
 
         fig, ax = plt.subplots(1, 1, figsize=(15, 8))
-        colors = plt.cm.tab20(np.linspace(0, 1, max(1, len(species_list))))
+        cmap_tab20 = plt.get_cmap('tab20')
+        colors = cmap_tab20(np.linspace(0, 1, max(1, len(species_list))))
         y_offset = 0.0
         for i, sp in enumerate(species_list):
             mask = np.array([s == sp for s in species_all])
@@ -252,7 +253,7 @@ class SpectrumVisualizer:
             inten_norm = inten / max_i
             scale = 0.9  # vertical scale per species row
             ax.vlines(wl, y_offset, y_offset + scale * inten_norm, colors=colors[i % len(colors)], alpha=0.9, linewidth=2)
-            ax.text(np.median(wl), y_offset + 1.05 * scale, sp, ha='center', va='bottom', fontweight='bold', color=colors[i % len(colors)])
+            ax.text(float(np.median(wl)), y_offset + 1.05 * scale, sp, ha='center', va='bottom', fontweight='bold', color=colors[i % len(colors)])
             y_offset += 1.4
 
         ax.set_xlabel("Wavelength (nm)")
@@ -308,7 +309,8 @@ class SpectrumVisualizer:
         """Step 8: Plot band regions for species."""
         fig, ax = plt.subplots(1, 1, figsize=(15, 8))
         
-        colors = plt.cm.tab20(np.linspace(0, 1, len(bands)))
+        cmap_tab20 = plt.get_cmap('tab20')
+        colors = cmap_tab20(np.linspace(0, 1, len(bands)))
         y_offset = 0
         
         for i, (species, band_list) in enumerate(bands.items()):
@@ -428,8 +430,9 @@ class SpectrumVisualizer:
             
             # Color bars by magnitude
             max_coeff = np.max(sig_coeffs)
+            cmap_viridis = plt.get_cmap('viridis')
             for i, bar in enumerate(bars):
-                bar.set_color(plt.cm.viridis(sig_coeffs[i] / max_coeff))
+                bar.set_color(cmap_viridis(sig_coeffs[i] / max_coeff))
         else:
             ax_coeff.text(0.5, 0.5, "No significant\ncoefficients", ha='center', va='center',
                          transform=ax_coeff.transAxes, fontsize=12, alpha=0.6)
@@ -453,7 +456,8 @@ class SpectrumVisualizer:
             ax_contrib = fig.add_subplot(gs[2, :])
             ax_contrib.plot(wl_grid, y_observed, 'k-', linewidth=2, label='Observed', alpha=0.7)
             
-            colors = plt.cm.tab10(np.linspace(0, 1, len(sig_names)))
+            cmap_tab10 = plt.get_cmap('tab10')
+            colors = cmap_tab10(np.linspace(0, 1, len(sig_names)))
             y_cumulative = np.zeros_like(wl_grid)
             
             for i, (name, coeff) in enumerate(zip(sig_names, sig_coeffs)):
@@ -486,7 +490,8 @@ class SpectrumVisualizer:
         
         # Highlight bands for detected species
         if bands and detection_result.present:
-            colors = plt.cm.Set3(np.linspace(0, 1, len(detection_result.present)))
+            cmap_set3 = plt.get_cmap('Set3')
+            colors = cmap_set3(np.linspace(0, 1, len(detection_result.present)))
             for i, detection in enumerate(detection_result.present):
                 species = detection['species']
                 if species in bands:
@@ -514,8 +519,9 @@ class SpectrumVisualizer:
             
             # Color bars by score
             max_score = max(scores)
+            cmap_viridis = plt.get_cmap('viridis')
             for i, bar in enumerate(bars):
-                bar.set_color(plt.cm.viridis(scores[i] / max_score))
+                bar.set_color(cmap_viridis(scores[i] / max_score))
         else:
             ax_scores.text(0.5, 0.5, "No species\ndetected", ha='center', va='center',
                           transform=ax_scores.transAxes, fontsize=14, alpha=0.6)
@@ -536,8 +542,9 @@ class SpectrumVisualizer:
             
             # Color bars by hits
             max_hits = max(band_hits) if band_hits else 1
+            cmap_plasma = plt.get_cmap('plasma')
             for i, bar in enumerate(bars):
-                bar.set_color(plt.cm.plasma(band_hits[i] / max_hits))
+                bar.set_color(cmap_plasma(band_hits[i] / max_hits))
         else:
             ax_bands.text(0.5, 0.5, "No species\ndetected", ha='center', va='center',
                          transform=ax_bands.transAxes, fontsize=14, alpha=0.6)
@@ -567,9 +574,10 @@ class SpectrumVisualizer:
             table.scale(1, 1.5)
             
             # Color table rows
+            cmap_set3 = plt.get_cmap('Set3')
             for i in range(len(table_data)):
                 for j in range(len(headers)):
-                    table[(i+1, j)].set_facecolor(plt.cm.Set3(i / len(table_data)))
+                    table[(i+1, j)].set_facecolor(cmap_set3(i / len(table_data)))
                     
             ax_table.set_title("Detection Summary", fontweight='bold', pad=20)
         else:
@@ -600,8 +608,9 @@ class SpectrumVisualizer:
             
             # Color bars
             max_score = max(scores)
+            cmap_viridis = plt.get_cmap('viridis')
             for i, bar in enumerate(bars):
-                bar.set_color(plt.cm.viridis(scores[i] / max_score))
+                bar.set_color(cmap_viridis(scores[i] / max_score))
                 # Add score labels
                 ax_overall.text(scores[i] + max_score * 0.01, i, f'{scores[i]:.3f}', 
                               va='center', ha='left', fontweight='bold')
