@@ -269,12 +269,15 @@ class SpectrumVisualizer:
         baseline: np.ndarray,
         y_cr: np.ndarray,
         title: str = "Continuum Removal",
+        *,
+        y_div: Optional[np.ndarray] = None,
+        baseline_div: Optional[np.ndarray] = None,
     ):
         """Step 4: Plot continuum removal process."""
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+        fig, axes = plt.subplots(2, 3, figsize=(22, 10))
 
-        # Original with baseline
-        axes[0, 0].set_title("Original + Baseline", fontweight="bold")
+        # Original + ARPLS baseline (now baseline refers to ARPLS baseline)
+        axes[0, 0].set_title("Original + ARPLS Baseline", fontweight="bold")
         axes[0, 0].plot(
             wl_grid, y_sub, "b-", label="Background Subtracted", linewidth=2
         )
@@ -287,33 +290,44 @@ class SpectrumVisualizer:
         axes[0, 0].legend()
         axes[0, 0].grid(True, alpha=0.3)
 
-        # Baseline only
-        axes[0, 1].set_title("Fitted Baseline", fontweight="bold")
+        # ARPLS Baseline only
+        axes[0, 1].set_title("ARPLS Baseline", fontweight="bold")
         axes[0, 1].plot(wl_grid, baseline, "r-", linewidth=3)
         axes[0, 1].set_xlabel("Wavelength (nm)")
         axes[0, 1].set_ylabel("Baseline Intensity")
         axes[0, 1].grid(True, alpha=0.3)
 
-        # Continuum removed
-        axes[1, 0].set_title("Continuum Removed", fontweight="bold")
-        axes[1, 0].plot(wl_grid, y_cr, "g-", linewidth=2, label="Continuum Removed")
-        axes[1, 0].axhline(0, color="k", linestyle="-", alpha=0.3)
-        axes[1, 0].set_xlabel("Wavelength (nm)")
-        axes[1, 0].set_ylabel("Normalized Intensity")
-        axes[1, 0].legend()
-        axes[1, 0].grid(True, alpha=0.3)
+        # After ARPLS (pre-division) and division envelope (if provided)
+        if y_div is not None and baseline_div is not None:
+            axes[1, 0].set_title("After ARPLS + Envelope (for subtraction)", fontweight="bold")
+            axes[1, 0].plot(wl_grid, y_div, "m-", linewidth=2, label="After ARPLS")
+            axes[1, 0].plot(wl_grid, baseline_div, "c-", linewidth=2, label="Envelope")
+            axes[1, 0].set_xlabel("Wavelength (nm)")
+            axes[1, 0].set_ylabel("Intensity")
+            axes[1, 0].legend()
+            axes[1, 0].grid(True, alpha=0.3)
+        else:
+            axes[1, 0].set_visible(False)
 
-        # Before vs After (use twin y-axes so "After" is visible on normalized scale)
-        axes[1, 1].set_title("Before vs After", fontweight="bold")
-        ax_before = axes[1, 1]
+        # Division result overlay for clarity
+        axes[1, 1].set_title("Subtraction Result (Final)", fontweight="bold")
+        axes[1, 1].plot(wl_grid, y_cr, "g-", linewidth=2, label="Final y")
+        axes[1, 1].axhline(0, color="k", linestyle="-", alpha=0.3)
+        axes[1, 1].set_xlabel("Wavelength (nm)")
+        axes[1, 1].set_ylabel("Intensity")
+        axes[1, 1].legend()
+        axes[1, 1].grid(True, alpha=0.3)
+
+        # Before vs Final
+        axes[1, 2].set_title("Before vs Final", fontweight="bold")
+        ax_before = axes[1, 2]
         ax_after = ax_before.twinx()
         line_before, = ax_before.plot(wl_grid, y_sub, "b-", alpha=0.7, label="Before")
-        line_after, = ax_after.plot(wl_grid, y_cr, "g-", linewidth=2, label="After")
+        line_after, = ax_after.plot(wl_grid, y_cr, "g-", linewidth=2, label="Final")
         ax_before.set_xlabel("Wavelength (nm)")
         ax_before.set_ylabel("Intensity")
         ax_after.set_ylabel("Normalized Intensity")
         ax_before.grid(True, alpha=0.3)
-        # Combined legend
         lines = [line_before, line_after]
         labels = [line.get_label() for line in lines]
         ax_before.legend(lines, labels, loc="best")
@@ -583,6 +597,7 @@ class SpectrumVisualizer:
         species_names: List[str],
         fit_R2: float,
         templates: Optional[np.ndarray] = None,
+        per_species_scores: Optional[Dict[str, float]] = None,
         title: str = "NNLS Fitting Results",
     ):
         """Step 10: Plot NNLS fitting results."""
@@ -614,29 +629,76 @@ class SpectrumVisualizer:
         ax_resid.set_ylabel("Residual")
         ax_resid.grid(True, alpha=0.3)
 
-        # Coefficient bar plot
+        # TVE bar plot (sorted by TVE/FVE when available)
         ax_coeff = fig.add_subplot(gs[1, 1])
-        significant_mask = coeffs > 0.001 * np.max(
-            coeffs
-        )  # Show only significant coefficients
-        sig_coeffs = coeffs[significant_mask]
-        sig_names = [
-            species_names[i] for i in range(len(species_names)) if significant_mask[i]
+        # Determine significant species by TVE if available; fallback to coefficients
+        tve_lookup: Dict[str, float] = per_species_scores or {}
+        tve_all = np.asarray(
+            [float(tve_lookup.get(name, 0.0)) for name in species_names], dtype=float
+        )
+        coeffs_all = np.asarray(coeffs, dtype=float)
+        # If we have meaningful TVE values, filter by TVE; otherwise by coefficient
+        if np.any(tve_all > 0):
+            max_tve = float(np.max(tve_all))
+            tve_thr = max(1e-4, 0.01 * max_tve)
+            sig_indices = [i for i in range(len(species_names)) if tve_all[i] >= tve_thr]
+            # If nothing passes, keep top 10 by TVE
+            if not sig_indices:
+                sig_indices = list(np.argsort(tve_all)[-10:])
+        else:
+            coeff_thr = 0.001 * float(np.max(coeffs_all)) if np.any(coeffs_all > 0) else 0.0
+            sig_indices = [i for i in range(len(species_names)) if coeffs_all[i] > coeff_thr]
+
+        # Build sortable tuples: (name, coeff, tve)
+        sortable: List[Tuple[str, float, float]] = [
+            (
+                species_names[i],
+                float(coeffs_all[i]),
+                float(tve_all[i]),
+            )
+            for i in sig_indices
         ]
+        # Sort by TVE descending (stable fallback to coefficient if equal)
+        sortable.sort(key=lambda t: (t[2], t[1]), reverse=True)
+        sig_names = [t[0] for t in sortable]
+        sig_coeffs = np.asarray([t[1] for t in sortable], dtype=float)
+        sig_tve = np.asarray([t[2] for t in sortable], dtype=float)
 
         if len(sig_coeffs) > 0:
-            bars = ax_coeff.barh(range(len(sig_coeffs)), sig_coeffs)
+            # Use TVE as bar length; clamp to [0, 1] and color by TVE
+            sig_tve_clamped = np.clip(sig_tve, 0.0, 1.0)
+            norm = plt.Normalize(
+                vmin=float(np.min(sig_tve_clamped)),
+                vmax=float(max(np.max(sig_tve_clamped), 1e-12)),
+            )
+            cmap_viridis = plt.get_cmap("viridis")
+            colors = cmap_viridis(norm(sig_tve_clamped))
+            bars = ax_coeff.barh(range(len(sig_coeffs)), sig_tve_clamped, color=colors)
             ax_coeff.set_yticks(range(len(sig_coeffs)))
             ax_coeff.set_yticklabels(sig_names)
-            ax_coeff.set_title("Significant Coefficients", fontweight="bold")
-            ax_coeff.set_xlabel("Coefficient Value")
+            ax_coeff.set_title("Significant Species (sorted by TVE)", fontweight="bold")
+            ax_coeff.set_xlabel("TVE (fraction)")
+            # Enforce consistent, linear scaling across runs
+            ax_coeff.set_xscale("linear")
+            ax_coeff.set_xlim(0.0, 1.0)
+            ax_coeff.set_xticks(np.linspace(0.0, 1.0, 6))
+            # Put the highest TVE at the top of the chart
+            ax_coeff.invert_yaxis()
             ax_coeff.grid(True, alpha=0.3)
 
-            # Color bars by magnitude
-            max_coeff = np.max(sig_coeffs)
-            cmap_viridis = plt.get_cmap("viridis")
+            # Annotate TVE next to bars for clarity
             for i, bar in enumerate(bars):
-                bar.set_color(cmap_viridis(sig_coeffs[i] / max_coeff))
+                # Keep label within axes bounds
+                text_x = float(bar.get_width()) * 1.01
+                text_x = min(max(text_x, 0.01), 0.98)
+                ax_coeff.text(
+                    text_x,
+                    bar.get_y() + bar.get_height() / 2,
+                    f"TVE={sig_tve[i]:.3f}",
+                    va="center",
+                    ha="left",
+                    fontsize=9,
+                )
         else:
             ax_coeff.text(
                 0.5,
@@ -677,8 +739,13 @@ class SpectrumVisualizer:
                 wl_grid, y_observed, "k-", linewidth=2, label="Observed", alpha=0.7
             )
 
-            cmap_tab10 = plt.get_cmap("tab10")
-            colors = cmap_tab10(np.linspace(0, 1, len(sig_names)))
+            # Use a richer palette for many species
+            if len(sig_names) <= 20:
+                cmap = plt.get_cmap("tab20")
+            else:
+                # Continuous colormap with lots of distinct hues
+                cmap = plt.get_cmap("turbo")
+            colors = cmap(np.linspace(0, 1, len(sig_names)))
             y_cumulative = np.zeros_like(wl_grid)
 
             for i, (name, coeff) in enumerate(zip(sig_names, sig_coeffs)):
@@ -692,7 +759,12 @@ class SpectrumVisualizer:
                         y_cumulative,
                         alpha=0.7,
                         color=colors[i],
-                        label=f"{name} ({coeff:.3f})",
+                        # Label with TVE if available, otherwise coefficient
+                        label=(
+                            f"{name} ({tve_lookup.get(name, 0.0):.3f})"
+                            if per_species_scores is not None
+                            else f"{name} ({coeff:.3f})"
+                        ),
                     )
 
             ax_contrib.set_title("Individual Species Contributions", fontweight="bold")
@@ -746,6 +818,11 @@ class SpectrumVisualizer:
                             color=colors[i],
                             label=f"{species} bands" if i == 0 else "",
                         )
+
+        # Ensure x-axis is limited to the spectrometer's data range
+        ax_main.set_xlim(
+            float(detection_result.wl_grid[0]), float(detection_result.wl_grid[-1])
+        )
 
         ax_main.set_title(
             f"Species Detection Results (R² = {detection_result.fit_R2:.4f})",
@@ -1221,9 +1298,15 @@ class SpectrumVisualizer:
             "Background Subtraction",
         )
 
-        # 05: Continuum removal
+        # 05: Continuum removal (show both divide and ARPLS steps if available)
         self.plot_continuum_removal(
-            pre.wl_grid, pre.y_sub, pre.baseline, pre.y_cr, "Continuum Removal"
+            pre.wl_grid,
+            pre.y_sub,
+            pre.baseline,
+            pre.y_cr,
+            "Continuum Removal",
+            y_div=getattr(pre, "y_div", None),
+            baseline_div=getattr(pre, "baseline_div", None),
         )
 
         # 06: Reference lines
@@ -1269,11 +1352,22 @@ class SpectrumVisualizer:
             species_names,
             R2,
             templates=templates,
+            per_species_scores=getattr(det, "per_species_scores", None),
             title="NNLS Fitting Results",
         )
 
+        # Determine threshold label for visualization (fixed default 0.02)
+        thr = (
+            float(getattr(config, "presence_threshold", 0.02))
+            if getattr(config, "presence_threshold", None) is not None
+            else 0.02
+        )
+        sens_label = f"presence_threshold={thr:.2f}"
+
         # 11: Detection results view
-        self.plot_detection_results(det, bands=bands, title="Species Detection Results")
+        det_title = f"Species Detection Results  [{sens_label}]"
+        self.plot_detection_results(det, bands=bands, title=det_title)
 
         # 12: Overall summary
-        self.plot_analysis_summary(result, "Complete Analysis Summary")
+        summary_title = f"Complete Analysis Summary  [{sens_label}]"
+        self.plot_analysis_summary(result, summary_title)

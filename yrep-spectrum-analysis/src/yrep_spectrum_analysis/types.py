@@ -32,10 +32,6 @@ class Instrument:
     grid_step_nm: Optional[float] = None
     max_shift_nm: float = 3.0
 
-    @property
-    def sigma_nm(self) -> float:
-        return float(self.fwhm_nm) / (2.0 * np.sqrt(2.0 * np.log(2.0)))
-
 
 # Optional user overrides (advanced), each receives arrays and returns arrays
 BackgroundFn = Callable[
@@ -49,30 +45,20 @@ ContinuumFn = Callable[[np.ndarray, np.ndarray, float], Tuple[np.ndarray, np.nda
 class AnalysisConfig:
     # Core
     instrument: Instrument = field(default_factory=Instrument)
-    mode: str = "balanced"  # fast | balanced | accurate
-    sensitivity: str = "medium"  # low | medium | high
     species: Optional[List[str]] = None  # optional species filter
 
     # Tweaks (coarse knobs)
     baseline_strength: float = 0.5  # 0..1
-    regularization: str = "none"  # none | light | strong
+    regularization: float = 0.0  # ridge λ; 0.0 (none), ~1e-2 (light), ~1e-1 (strong)
     min_bands_required: int = 2
-    presence_threshold: Optional[float] = None  # derived from sensitivity if None
+    presence_threshold: Optional[float] = None  # defaults to 0.02 if None
     top_k: int = 5
-    return_arrays: bool = True
 
-    # Preprocessing trims
-    min_wavelength_nm: Optional[float] = (
-        None  # drop data below this wavelength if provided
-    )
-    auto_trim_left: bool = (
-        False  # if True and min_wavelength_nm is None, auto-trim steep left spike
-    )
+    # Preprocessing trims (grouped settings)
+    trim: "TrimSettings" = field(default_factory=lambda: TrimSettings())
 
     # Background handling
-    align_background: bool = (
-        False  # if True, register (shift) background before subtraction
-    )
+    align_background: bool = (False) # if True, register (shift) background before subtraction
 
     # Optional advanced overrides
     background_fn: Optional[BackgroundFn] = None
@@ -86,9 +72,22 @@ class PreprocessResult:
     y_sub: np.ndarray
     y_cr: np.ndarray
     baseline: np.ndarray
+    # Optional intermediates for visualization
+    y_div: Optional[np.ndarray] = None
+    baseline_div: Optional[np.ndarray] = None
     y_bg_interp: Optional[np.ndarray] = None
     avg_meas: Optional[Tuple[np.ndarray, np.ndarray]] = None
     avg_bg: Optional[Tuple[np.ndarray, np.ndarray]] = None
+
+
+@dataclass
+class TrimSettings:
+    # Explicit bounds; None means no explicit bound
+    min_wavelength_nm: Optional[float] = None
+    max_wavelength_nm: Optional[float] = None
+    # Heuristic trims for left/right spike regions
+    auto_trim_left: bool = False
+    auto_trim_right: bool = False
 
 
 @dataclass

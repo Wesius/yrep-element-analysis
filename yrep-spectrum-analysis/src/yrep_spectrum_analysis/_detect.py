@@ -54,25 +54,6 @@ def _search_best_shift(
             best_R2, best_shift, best_y = R2, s, y_s
     return float(best_shift), best_y
 
-
-def _presence_threshold_from_sensitivity(sensitivity: str) -> float:
-    s = (sensitivity or "medium").lower()
-    if s == "high":
-        return 0.01
-    if s == "low":
-        return 0.05
-    return 0.02
-
-
-def _ridge_lambda(regularization: str) -> float:
-    r = (regularization or "none").lower()
-    if r == "light":
-        return 1e-2
-    if r == "strong":
-        return 1e-1
-    return 0.0
-
-
 def nnls_detect(
     wl_grid_nm: np.ndarray,
     y_cr: np.ndarray,
@@ -84,7 +65,8 @@ def nnls_detect(
 ):
     cfg = config or AnalysisConfig()
     # Ridge via Tikhonov augmentation and bounded least squares
-    lam = _ridge_lambda(cfg.regularization)
+    lam = float(cfg.regularization) if getattr(cfg, "regularization", None) is not None else 0.0
+    lam = max(0.0, lam)
     S = S_templates
     y = y_cr
     # coarse wavelength alignment to references
@@ -138,11 +120,7 @@ def nnls_detect(
         return hit
 
     # Present list
-    thr = (
-        cfg.presence_threshold
-        if cfg.presence_threshold is not None
-        else _presence_threshold_from_sensitivity(cfg.sensitivity)
-    )
+    thr = float(cfg.presence_threshold) if cfg.presence_threshold is not None else 0.02
     present: List[Dict[str, float | int | str]] = []
     for i, sp in enumerate(species_names):
         if coeffs[i] <= 0:

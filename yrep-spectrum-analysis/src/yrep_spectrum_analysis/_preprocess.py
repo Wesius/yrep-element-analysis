@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Sequence, Tuple
 import numpy as np
+from scipy.ndimage import percentile_filter, gaussian_filter1d
 from pybaselines import Baseline
 from skimage.registration import phase_cross_correlation
 
@@ -40,6 +41,47 @@ def _uniform_grid_from_data(
     return np.arange(wl_min, wl_max, step)
 
 
+def continuum_upper_envelope(
+    wl: np.ndarray,
+    y: np.ndarray,
+    strength: float = 0.6,
+    mode: str = "subtract",  # "divide" for multiplicative continuum, "subtract" otherwise
+) -> Tuple[np.ndarray, np.ndarray]:
+    wl = np.asarray(wl, float)
+    y = np.asarray(y, float)
+
+    # grid step
+    step = (wl[-1] - wl[0]) / max(1, wl.size - 1)
+
+    # window and quantile scale with "strength"
+    win_nm = np.interp(strength, [0.0, 1.0], [18.0, 45.0])
+    W = int(max(5, 2 * round(win_nm / step) + 1))
+
+    # pre-smooth so single spikes don't define the envelope
+    y_s = gaussian_filter1d(y, sigma=max(1, W // 6), mode="nearest")
+
+    # high local quantile ≈ upper envelope (ignore tallest spikes)
+    q = float(np.interp(strength, [0.0, 1.0], [0.82, 0.92])) * 100.0
+    base_q = percentile_filter(y_s, percentile=q, size=W, mode="nearest")
+
+    # safety: don't go below a robust lower-envelope spline
+    lam = (y.size / 200.0) ** 2 * 1e6 * (0.5 + strength)
+    base_lo, _ = Baseline(wl).arpls(y, lam=lam, max_iter=25, tol=1e-2)
+
+    base = np.maximum(base_q, base_lo)
+
+    if mode == "divide":
+        # Clamp divisor to >= 1.0 so dividing by <1 never amplifies values
+        floor = max(1.0, float(np.percentile(base, 5.0)))
+        cr = y / np.maximum(base, floor)
+        cr = cr / max(np.percentile(cr, 99.5), 1e-9)  # robust normalize
+    else:
+        # fully subtract the estimated continuum baseline
+        cr = y - base
+
+    return cr.astype(float), base.astype(float)
+
+
 def _continuum_remove(
     wl: np.ndarray, y: np.ndarray, strength: float, override_fn=None
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -47,16 +89,19 @@ def _continuum_remove(
         y_cr, baseline = override_fn(wl, y, strength)
         return np.asarray(y_cr, dtype=float), np.asarray(baseline, dtype=float)
 
-    # Use pybaselines.ASLS with strength-adjusted lambda
+    # Default: ARPLS subtract first on raw signal, then divide by upper-envelope
     N = int(y.size)
-    lam = max(1e4, (N / 200.0) ** 2 * 1e5)
-    lam = lam * (0.5 + strength)  # scale by strength
-    base, _ = Baseline(wl).asls(y, lam=lam, p=0.01)
-    corrected = y - base
-
-    norm = float(np.linalg.norm(corrected) + 1e-12)
-    corrected = corrected / norm
-    return corrected.astype(float), np.asarray(base, dtype=float)
+    lam2 = (N / 200.0) ** 2 * 1e6 * (0.5 + strength)
+    base_ar, _ = Baseline(wl).arpls(y, lam=lam2, max_iter=25, tol=1e-2)
+    y_after_arpls = y - base_ar
+    cr_div, base_upper = continuum_upper_envelope(
+        wl, y_after_arpls, strength=strength, mode="subtract"
+    )
+    cr = cr_div
+    # Stash intermediates: pre-division residual and envelope used for division
+    _continuum_remove._last_div = (y_after_arpls.astype(float), base_upper.astype(float))  # type: ignore
+    # Return final signal and the ARPLS baseline for top-row visualization
+    return cr.astype(float), np.asarray(base_ar, dtype=float)
 
 
 def _register_and_subtract(
@@ -70,8 +115,8 @@ def _register_and_subtract(
         return override_fn(wl, std_y, wl, bg_y, instr)
 
     # Continuum remove for registration stability
-    std_cr, _ = _continuum_remove(wl, std_y, strength=0.6, override_fn=None)
-    bg_cr, _ = _continuum_remove(wl, bg_y, strength=0.6, override_fn=None)
+    std_cr, _ = _continuum_remove(wl, std_y, strength=0.4, override_fn=None)
+    bg_cr, _ = _continuum_remove(wl, bg_y, strength=0.4, override_fn=None)
 
     shifts, _, _ = phase_cross_correlation(std_cr, bg_cr, upsample_factor=20)
     shift_samples = float(np.ravel(shifts)[0])
@@ -90,6 +135,82 @@ def _register_and_subtract(
     }
 
 
+def _detect_left_spike_wavelength(probe: Spectrum) -> float:
+    dy = np.diff(probe.intensity)
+    dw = np.diff(probe.wavelength)
+    slope = dy / (dw + 1e-12)
+    abs_slope = np.abs(slope)
+    thr = np.percentile(abs_slope, 95.0)
+    idx = int(np.argmax(abs_slope > thr)) if slope.size > 0 else 0
+    wl_min_keep = float(probe.wavelength[max(0, idx)])
+    if dw.size > 0:
+        wl_min_keep += float(np.median(dw))
+    return wl_min_keep
+
+
+def _detect_right_spike_wavelength(probe: Spectrum) -> float:
+    dy = np.diff(probe.intensity)
+    dw = np.diff(probe.wavelength)
+    slope = dy / (dw + 1e-12)
+    abs_slope = np.abs(slope)
+    thr = np.percentile(abs_slope, 95.0)
+    if slope.size > 0 and np.any(abs_slope > thr):
+        idx_r = int(np.where(abs_slope > thr)[0][-1])
+    else:
+        idx_r = slope.size - 1 if slope.size > 0 else 0
+    j = min(idx_r + 1, int(probe.wavelength.size - 1))
+    wl_max_keep = float(probe.wavelength[max(0, j)])
+    if dw.size > 0:
+        wl_max_keep -= float(np.median(dw))
+    return wl_max_keep
+
+
+def _compute_trim_bounds(meas: List[Spectrum], ts) -> Tuple[float, float]:
+    wl_min_keep = float("-inf")
+    wl_max_keep = float("inf")
+    if getattr(ts, "min_wavelength_nm", None) is not None:
+        wl_min_keep = float(ts.min_wavelength_nm)
+    elif getattr(ts, "auto_trim_left", False):
+        try:
+            wl_min_keep = _detect_left_spike_wavelength(meas[0])
+        except Exception:
+            wl_min_keep = float(meas[0].wavelength[0])
+    if getattr(ts, "max_wavelength_nm", None) is not None:
+        wl_max_keep = float(ts.max_wavelength_nm)
+    elif getattr(ts, "auto_trim_right", False):
+        try:
+            wl_max_keep = _detect_right_spike_wavelength(meas[0])
+        except Exception:
+            wl_max_keep = float(meas[0].wavelength[-1])
+    return wl_min_keep, wl_max_keep
+
+
+def _trim_spectrum(spec: Spectrum, wl_min_keep: float, wl_max_keep: float) -> Spectrum:
+    left_ok = spec.wavelength >= wl_min_keep if np.isfinite(wl_min_keep) else True
+    right_ok = spec.wavelength <= wl_max_keep if np.isfinite(wl_max_keep) else True
+    mask = np.asarray(left_ok & right_ok, dtype=bool)
+    if not np.any(mask):
+        return spec
+    return Spectrum(wavelength=spec.wavelength[mask], intensity=spec.intensity[mask])
+
+
+    # Average measurement and background on overlap grid
+def _average_spectra(
+        specs: List[Spectrum], n_points: Optional[int] = None
+) -> Spectrum:
+    if len(specs) == 1:
+        return specs[0]
+    all_wl = [s.wavelength for s in specs]
+    wl_min = max(w.min() for w in all_wl)
+    wl_max = min(w.max() for w in all_wl)
+    if wl_min >= wl_max:
+        raise ValueError("spectra have no overlapping wavelength range")
+    n_points = n_points or 1000
+    wl_common = np.linspace(wl_min, wl_max, n_points)
+    intens = [np.interp(wl_common, s.wavelength, s.intensity) for s in specs]
+    avg = np.mean(np.stack(intens, axis=0), axis=0)
+    return Spectrum(wavelength=wl_common, intensity=avg)
+
 def preprocess(
     measurements: Sequence[SpectrumLike],
     backgrounds: Optional[Sequence[SpectrumLike]],
@@ -98,57 +219,18 @@ def preprocess(
     meas = _as_arrays(measurements)
     bg = _as_arrays(backgrounds) if backgrounds else []
 
-    # Optional left-trim to remove steep spike region
-    if getattr(config, "min_wavelength_nm", None) is not None or getattr(
-        config, "auto_trim_left", False
+    # Optional explicit/automatic wavelength trims (left/right)
+    ts = getattr(config, "trim", None)
+    if ts is not None and (
+        getattr(ts, "min_wavelength_nm", None) is not None
+        or getattr(ts, "max_wavelength_nm", None) is not None
+        or getattr(ts, "auto_trim_left", False)
+        or getattr(ts, "auto_trim_right", False)
     ):
-        if getattr(config, "min_wavelength_nm", None) is not None:
-            wl_min_keep = float(config.min_wavelength_nm)
-        else:
-            # Heuristic: detect steep left spike by derivative threshold on averaged measurement
-            try:
-                probe = meas[0]
-                dy = np.diff(probe.intensity)
-                dw = np.diff(probe.wavelength)
-                slope = dy / (dw + 1e-12)
-                # find first index where slope exceeds 95th percentile of absolute slope after 5th percentile of range
-                abs_slope = np.abs(slope)
-                thr = np.percentile(abs_slope, 95.0)
-                idx = int(np.argmax(abs_slope > thr)) if slope.size > 0 else 0
-                wl_min_keep = float(probe.wavelength[max(0, idx)])
-                # Provide a small safety margin of one grid step
-                if dw.size > 0:
-                    wl_min_keep += float(np.median(dw))
-            except Exception:
-                wl_min_keep = float(meas[0].wavelength[0])
+        wl_min_keep, wl_max_keep = _compute_trim_bounds(meas, ts)
+        meas = [_trim_spectrum(s, wl_min_keep, wl_max_keep) for s in meas]
+        bg = [_trim_spectrum(s, wl_min_keep, wl_max_keep) for s in bg] if bg else []
 
-        def _trim(spec: Spectrum) -> Spectrum:
-            mask = np.asarray(spec.wavelength >= wl_min_keep, dtype=bool)
-            if not np.any(mask):
-                return spec
-            return Spectrum(
-                wavelength=spec.wavelength[mask], intensity=spec.intensity[mask]
-            )
-
-        meas = [_trim(s) for s in meas]
-        bg = [_trim(s) for s in bg] if bg else []
-
-    # Average measurement and background on overlap grid
-    def _average_spectra(
-        specs: List[Spectrum], n_points: Optional[int] = None
-    ) -> Spectrum:
-        if len(specs) == 1:
-            return specs[0]
-        all_wl = [s.wavelength for s in specs]
-        wl_min = max(w.min() for w in all_wl)
-        wl_max = min(w.max() for w in all_wl)
-        if wl_min >= wl_max:
-            raise ValueError("spectra have no overlapping wavelength range")
-        n_points = n_points or 1000
-        wl_common = np.linspace(wl_min, wl_max, n_points)
-        intens = [np.interp(wl_common, s.wavelength, s.intensity) for s in specs]
-        avg = np.mean(np.stack(intens, axis=0), axis=0)
-        return Spectrum(wavelength=wl_common, intensity=avg)
 
     avg_meas = (
         _average_spectra(
@@ -250,6 +332,8 @@ def preprocess(
         y_sub=y_sub,
         y_cr=y_cr,
         baseline=baseline,
+        y_div=getattr(_continuum_remove, "_last_div", (None, None))[0],
+        baseline_div=getattr(_continuum_remove, "_last_div", (None, None))[1],
         y_bg_interp=y_bg,
         avg_meas=(avg_meas.wavelength, avg_meas.intensity),
         avg_bg=(avg_bg.wavelength, avg_bg.intensity) if avg_bg is not None else None,
