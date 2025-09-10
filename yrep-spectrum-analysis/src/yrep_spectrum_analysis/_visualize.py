@@ -819,10 +819,12 @@ class SpectrumVisualizer:
                             label=f"{species} bands" if i == 0 else "",
                         )
 
-        # Ensure x-axis is limited to the spectrometer's data range
-        ax_main.set_xlim(
-            float(detection_result.wl_grid[0]), float(detection_result.wl_grid[-1])
-        )
+        # Ensure x-axis is strictly limited to the spectrometer's data range
+        wl_min = float(detection_result.wl_grid[0])
+        wl_max = float(detection_result.wl_grid[-1])
+        ax_main.set_xlim(wl_min, wl_max)
+        ax_main.set_autoscalex_on(False)
+        ax_main.margins(x=0.0)
 
         ax_main.set_title(
             f"Species Detection Results (R² = {detection_result.fit_R2:.4f})",
