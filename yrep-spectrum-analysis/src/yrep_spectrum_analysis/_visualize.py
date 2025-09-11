@@ -278,7 +278,7 @@ class SpectrumVisualizer:
         """Step 4: Plot continuum removal process."""
         fig, axes = plt.subplots(2, 3, figsize=(22, 10))
 
-        # Original + ARPLS baseline (now baseline refers to ARPLS baseline)
+        # Original + ARPLS baseline
         axes[0, 0].set_title("Original + ARPLS Baseline", fontweight="bold")
         axes[0, 0].plot(
             wl_grid, y_sub, "b-", label="Background Subtracted", linewidth=2
@@ -292,12 +292,22 @@ class SpectrumVisualizer:
         axes[0, 0].legend()
         axes[0, 0].grid(True, alpha=0.3)
 
-        # ARPLS Baseline only
-        axes[0, 1].set_title("ARPLS Baseline", fontweight="bold")
-        axes[0, 1].plot(wl_grid, baseline, "r-", linewidth=3)
+        # ARPLS subtracted result
+        axes[0, 1].set_title("ARPLS Subtracted", fontweight="bold")
+        y_arpls_sub = y_sub - baseline
+        axes[0, 1].plot(wl_grid, y_arpls_sub, "g-", linewidth=2, label="ARPLS Subtracted")
+        axes[0, 1].axhline(0, color="k", linestyle="-", alpha=0.3)
         axes[0, 1].set_xlabel("Wavelength (nm)")
-        axes[0, 1].set_ylabel("Baseline Intensity")
+        axes[0, 1].set_ylabel("Intensity")
+        axes[0, 1].legend()
         axes[0, 1].grid(True, alpha=0.3)
+
+        # ARPLS Baseline only
+        axes[0, 2].set_title("ARPLS Baseline", fontweight="bold")
+        axes[0, 2].plot(wl_grid, baseline, "r-", linewidth=3)
+        axes[0, 2].set_xlabel("Wavelength (nm)")
+        axes[0, 2].set_ylabel("Baseline Intensity")
+        axes[0, 2].grid(True, alpha=0.3)
 
         # After ARPLS (pre-division) and division envelope (if provided)
         if y_div is not None and baseline_div is not None:
