@@ -33,6 +33,13 @@ class Instrument:
     max_shift_nm: float = 3.0
 
 
+@dataclass
+class RefLines:
+    species: List[str]
+    wavelength_nm: np.ndarray
+    intensity: np.ndarray
+
+
 # Optional user overrides (advanced), each receives arrays and returns arrays
 BackgroundFn = Callable[
     [np.ndarray, np.ndarray, np.ndarray, np.ndarray, Instrument],

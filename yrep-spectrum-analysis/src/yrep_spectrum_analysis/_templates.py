@@ -1,18 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from .types import Instrument
+from .types import Instrument, RefLines
 
 
-@dataclass
-class RefLines:
-    species: List[str]
-    wavelength_nm: np.ndarray
-    intensity: np.ndarray
+ 
 
 
 def _base(sym: str) -> str:

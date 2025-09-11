@@ -10,8 +10,8 @@ import seaborn as sns
 from scipy.optimize import lsq_linear
 from scipy.signal import find_peaks
 
-from .types import DetectionResult, SpectrumLike
-from ._templates import RefLines, build_templates
+from .types import DetectionResult, SpectrumLike, RefLines
+from ._templates import build_templates
 
 # Set up matplotlib style
 plt.style.use("default")
