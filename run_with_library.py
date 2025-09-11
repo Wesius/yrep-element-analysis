@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-from yrep_spectrum_analysis import AnalysisConfig, analyze, Instrument, TrimSettings
+from yrep_spectrum_analysis import AnalysisConfig, analyze, Instrument
 from yrep_spectrum_analysis.utils import load_batch, load_references, group_spectra
 
 
@@ -32,17 +32,22 @@ CFG = AnalysisConfig(
     min_bands_required=5,
     presence_threshold=0,  # default threshold (FVE fraction)
     top_k=3,
-    # Trimming controls
-    trim=TrimSettings(
-        min_wavelength_nm=300,
-        max_wavelength_nm=600,
-        auto_trim_left=False,
-        auto_trim_right=False,
-    ),
+    # Trimming controls (flattened)
+    min_wavelength_nm=300,
+    max_wavelength_nm=600,
+    auto_trim_left=False,
+    auto_trim_right=False,
     # Background handling and optional overrides
     align_background=False,
     background_fn=None,
     continuum_fn=None,
+    # Search controls
+    search_shift=True,
+    shift_search_iterations=10,
+    shift_search_spread=5,
+    search_fwhm=True,
+    fwhm_search_iterations=10,
+    fwhm_search_spread=1,
 )
 
 
@@ -51,7 +56,7 @@ def main() -> None:
     lists_dir = base / "data" / "lists"
     refs = load_references(lists_dir)
 
-    for std in ["Copper", "StandardA", "StandardB", "StandardC", "StandardD"]: #     for std in ["StandardA", "StandardB", "StandardC", "StandardD"]:
+    for std in ["Copper", "StandardA", "StandardB", "StandardC"]: #     for std in ["StandardA", "StandardB", "StandardC", "StandardD"]:
         print(f"\nProcessing {std}...")
         std_dir = base / "data" / "StandardsTest" / std
         meas_root = (
