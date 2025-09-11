@@ -342,6 +342,22 @@ def preprocess(
     # Final non-negativity
     y_cr = np.maximum(y_cr, 0.0)
 
+    # Apply optional wavelength mask: zero out y_cr in specified intervals
+    mask_intervals = getattr(config, "mask", None)
+    if mask_intervals:
+        for a, b in mask_intervals:
+            try:
+                a_f = float(a)
+                b_f = float(b)
+            except Exception:
+                continue
+            lo = min(a_f, b_f)
+            hi = max(a_f, b_f)
+            if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
+                m = (wl_grid >= lo) & (wl_grid <= hi)
+                if np.any(m):
+                    y_cr[m] = 0.0
+
     return PreprocessResult(
         wl_grid=wl_grid,
         y_meas=y_meas,

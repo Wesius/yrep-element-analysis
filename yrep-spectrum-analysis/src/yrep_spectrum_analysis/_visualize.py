@@ -8,6 +8,7 @@ import matplotlib.patches as patches
 from matplotlib.gridspec import GridSpec
 import seaborn as sns
 from scipy.optimize import lsq_linear
+from scipy.signal import find_peaks
 
 from .types import DetectionResult, SpectrumLike
 from ._templates import RefLines, build_templates
@@ -1251,6 +1252,60 @@ class SpectrumVisualizer:
 
         self._save_and_show(fig, self._get_next_filename("analysis_summary"), title)
 
+    def plot_peak_positions(
+        self,
+        wl_grid: np.ndarray,
+        y: np.ndarray,
+        title: str = "Peak Positions",
+        *,
+        config = None,
+        max_labels: int = 50,
+    ) -> None:
+        fig, ax = plt.subplots(1, 1, figsize=(16, 6))
+
+        ax.plot(wl_grid, y, "b-", linewidth=1.5, alpha=0.9, label="Signal")
+
+        y_range = float(np.max(y) - np.min(y)) if y.size else 0.0
+        prom_thr = max(1e-12, 0.02 * y_range)
+        step = (wl_grid[-1] - wl_grid[0]) / max(1, wl_grid.size - 1)
+        min_dist_nm = float(getattr(getattr(config, "instrument", object()), "fwhm_nm", 0.0)) if config is not None else 0.0
+        distance_samples = int(max(1, round(min_dist_nm / step))) if min_dist_nm > 0 else 1
+
+        idxs, props = find_peaks(y, prominence=prom_thr, distance=distance_samples)
+        prominences = np.asarray(props.get("prominences", np.ones_like(idxs, dtype=float)), dtype=float)
+
+        if idxs.size > max_labels:
+            order = np.argsort(prominences)[::-1][:max_labels]
+            idxs = idxs[order]
+            prominences = prominences[order]
+
+        ax.scatter(wl_grid[idxs], y[idxs], color="red", marker="^", s=40, zorder=5, label="Peaks")
+
+        y_max = float(np.max(y)) if np.any(np.isfinite(y)) else 1.0
+        text_offset = 0.03 * y_max
+        for i in range(idxs.size):
+            j = int(idxs[i])
+            x = float(wl_grid[j])
+            yv = float(y[j])
+            ax.text(
+                x,
+                yv + text_offset,
+                f"{x:.2f} nm",
+                rotation=90,
+                va="bottom",
+                ha="center",
+                fontsize=8,
+                color="black",
+            )
+
+        ax.set_title("Peak Positions (labeled)", fontweight="bold")
+        ax.set_xlabel("Wavelength (nm)")
+        ax.set_ylabel("Intensity")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        self._save_and_show(fig, self._get_next_filename("peaks"), title)
+
     def create_processing_flowchart(self, title: str = "Spectrum Analysis Pipeline"):
         """Create a flowchart showing the complete processing pipeline."""
         fig, ax = plt.subplots(1, 1, figsize=(16, 12))
@@ -1511,3 +1566,9 @@ class SpectrumVisualizer:
         # 12: Overall summary
         summary_title = f"Complete Analysis Summary  [{sens_label}]"
         self.plot_analysis_summary(result, summary_title)
+
+        # 13: Peak positions with labels
+        try:
+            self.plot_peak_positions(pre.wl_grid, pre.y_cr, "Peak Positions", config=config)
+        except Exception:
+            pass

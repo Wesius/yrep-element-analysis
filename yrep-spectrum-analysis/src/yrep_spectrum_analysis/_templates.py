@@ -86,6 +86,10 @@ def build_templates(
         area = float(np.trapezoid(tpl, wl_grid_nm) + 1e-12)
         if area > 0:
             tpl = tpl / area
+        # Ensure templates have unit L2 norm for stable NNLS scaling
+        norm2 = float(np.linalg.norm(tpl) + 1e-12)
+        if norm2 > 0:
+            tpl = tpl / norm2
         S_cols.append(tpl)
     S = (
         np.stack(S_cols, axis=1)
