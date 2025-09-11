@@ -35,7 +35,7 @@ def detect(
     )
     bands = build_bands_index(ref, names, instrument=config.instrument)
     coeffs, y_fit, present, per_species_scores, R2 = nnls_detect(
-        preprocessed.wl_grid, preprocessed.y_cr, S, names, bands=bands, config=config
+        preprocessed.wl_grid, preprocessed.y_cr, S, names, bands=bands, config=config, ref=ref
     )
     return DetectionResult(
         wl_grid=preprocessed.wl_grid,
@@ -82,7 +82,7 @@ def analyze(
     bands = build_bands_index(ref, names, instrument=cfg.instrument)
 
     coeffs, y_fit, present, per_species_scores, R2 = nnls_detect(
-        pre.wl_grid, pre.y_cr, S, names, bands=bands, config=cfg
+        pre.wl_grid, pre.y_cr, S, names, bands=bands, config=cfg, ref=ref
     )
     det = DetectionResult(
         wl_grid=pre.wl_grid,

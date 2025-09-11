@@ -6,13 +6,12 @@ Exports:
 - analyze: full pipeline (preprocess → templates/bands → detect)
 """
 
-from .types import AnalysisConfig, Spectrum, Instrument, TrimSettings
+from .types import AnalysisConfig, Spectrum, Instrument
 from .api import analyze
 
 __all__ = [
     "AnalysisConfig",
     "Instrument",
     "Spectrum",
-    "TrimSettings",
     "analyze",
 ]

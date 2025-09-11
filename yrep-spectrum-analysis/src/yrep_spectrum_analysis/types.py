@@ -49,13 +49,18 @@ class AnalysisConfig:
 
     # Tweaks (coarse knobs)
     baseline_strength: float = 0.5  # 0..1
+    # Continuum removal strategy: "arpls" (ARPLS subtraction), "rolling" (upper-envelope/percentile), or "both" (ARPLS then rolling)
+    continuum_strategy: str = "both"
     regularization: float = 0.0  # ridge λ; 0.0 (none), ~1e-2 (light), ~1e-1 (strong)
     min_bands_required: int = 2
     presence_threshold: Optional[float] = None  # defaults to 0.02 if None
     top_k: int = 5
 
-    # Preprocessing trims (grouped settings)
-    trim: "TrimSettings" = field(default_factory=lambda: TrimSettings())
+    # Preprocessing trims (flattened settings)
+    min_wavelength_nm: Optional[float] = None
+    max_wavelength_nm: Optional[float] = None
+    auto_trim_left: bool = False
+    auto_trim_right: bool = False
 
     # Background handling
     align_background: bool = (False) # if True, register (shift) background before subtraction
@@ -63,6 +68,22 @@ class AnalysisConfig:
     # Optional advanced overrides
     background_fn: Optional[BackgroundFn] = None
     continuum_fn: Optional[ContinuumFn] = None
+
+    # Search controls
+    # Coarse wavelength shift alignment against templates
+    search_shift: bool = True
+    shift_search_iterations: int = 1
+    # Optional FWHM optimization (templates rebuilt per candidate)
+    search_fwhm: bool = True
+    fwhm_search_iterations: int = 1
+    # Search spreads
+    # For shift (nm): search in [-max_shift_nm*shift_search_spread, +...]
+    shift_search_spread: float = 1.0
+    # For FWHM (relative): bracket width = fwhm_nm * fwhm_search_spread
+    fwhm_search_spread: float = 0.5
+
+    # Post-preprocessing wavelength mask: list of (start_nm, end_nm) intervals to zero
+    mask: Optional[List[Tuple[float, float]]] = None
 
 
 @dataclass
@@ -78,16 +99,6 @@ class PreprocessResult:
     y_bg_interp: Optional[np.ndarray] = None
     avg_meas: Optional[Tuple[np.ndarray, np.ndarray]] = None
     avg_bg: Optional[Tuple[np.ndarray, np.ndarray]] = None
-
-
-@dataclass
-class TrimSettings:
-    # Explicit bounds; None means no explicit bound
-    min_wavelength_nm: Optional[float] = None
-    max_wavelength_nm: Optional[float] = None
-    # Heuristic trims for left/right spike regions
-    auto_trim_left: bool = False
-    auto_trim_right: bool = False
 
 
 @dataclass

@@ -7,9 +7,10 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.gridspec import GridSpec
 import seaborn as sns
+from scipy.optimize import lsq_linear
 
 from .types import DetectionResult, SpectrumLike
-from ._templates import RefLines
+from ._templates import RefLines, build_templates
 
 # Set up matplotlib style
 plt.style.use("default")
@@ -520,10 +521,20 @@ class SpectrumVisualizer:
         y_original: np.ndarray,
         y_shifted: np.ndarray,
         best_shift: float,
-        title: str = "Wavelength Shift Optimization",
+        title: str = "Wavelength Optimization",
+        *,
+        ref: Optional[RefLines] = None,
+        species_names: Optional[List[str]] = None,
+        config = None,
     ):
-        """Step 9: Plot wavelength shift optimization."""
-        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        """Step 9: Plot wavelength alignment and (optionally) FWHM optimization."""
+        # Use 4 panels when plotting FWHM search as well
+        show_fwhm = ref is not None and species_names is not None and getattr(config, "search_fwhm", True)
+        ncols = 4 if show_fwhm else 3
+        figsize = (24, 6) if show_fwhm else (18, 6)
+        fig, axes = plt.subplots(1, ncols, figsize=figsize)
+        if not isinstance(axes, np.ndarray):
+            axes = np.array([axes])
 
         # Original vs shifted
         axes[0].set_title("Wavelength Alignment", fontweight="bold")
@@ -586,7 +597,84 @@ class SpectrumVisualizer:
         axes[2].set_ylim(0, 1)
         axes[2].axis("off")
 
-        self._save_and_show(fig, self._get_next_filename("wavelength_shift"), title)
+        # FWHM optimization (optional)
+        if show_fwhm:
+            try:
+                # center and bracket
+                center = float(getattr(getattr(config, "instrument", object()), "fwhm_nm", 2.0))
+                rel_spread = float(getattr(config, "fwhm_search_spread", 0.5))
+                width = max(1e-3, rel_spread * center)
+                iters = int(max(1, getattr(config, "fwhm_search_iterations", 1)))
+                species_filter = species_names
+
+                def _quick_fit_R2(y: np.ndarray, S: np.ndarray, lam: float = 1e-3) -> float:
+                    n = S.shape[1]
+                    if n == 0:
+                        return float("-inf")
+                    S_aug = np.vstack([S, np.sqrt(lam) * np.eye(n)])
+                    y_aug = np.concatenate([y, np.zeros(n)])
+                    sol = lsq_linear(S_aug, y_aug, bounds=(0.0, np.inf), method="trf")
+                    y_fit = S @ np.asarray(sol.x, dtype=float)
+                    ss_res = float(np.sum((y - y_fit) ** 2))
+                    ss_tot = float(np.sum(y**2) + 1e-12)
+                    return 1.0 - ss_res / ss_tot
+
+                # Use shifted signal for FWHM evaluation
+                y_eval = y_shifted
+                best_center = center
+                # evaluate on last-iteration candidate set for plotting
+                for _ in range(max(0, iters - 1)):
+                    lo = max(1e-3, center - width)
+                    hi = max(lo + 1e-3, center + width)
+                    candidates = np.linspace(lo, hi, num=7)
+                    best_R2 = -np.inf
+                    for cand in candidates:
+                        S_cand, names_cand = build_templates(ref, wl_grid, fwhm_nm=float(cand), species_filter=species_filter)
+                        # reorder to given species_names
+                        if list(names_cand) != list(species_names):
+                            name_to_idx = {n: i for i, n in enumerate(names_cand)}
+                            idxs = [name_to_idx[n] for n in species_names]
+                            S_eval = S_cand[:, idxs]
+                        else:
+                            S_eval = S_cand
+                        R2 = _quick_fit_R2(y_eval, S_eval)
+                        if R2 > best_R2:
+                            best_R2 = R2
+                            best_center = float(cand)
+                    center = best_center
+                    width *= 0.5
+
+                # Final candidate sweep to plot
+                lo = max(1e-3, center - width)
+                hi = max(lo + 1e-3, center + width)
+                fwhm_candidates = np.linspace(lo, hi, num=11)
+                scores = []
+                for cand in fwhm_candidates:
+                    S_cand, names_cand = build_templates(ref, wl_grid, fwhm_nm=float(cand), species_filter=species_filter)
+                    if list(names_cand) != list(species_names):
+                        name_to_idx = {n: i for i, n in enumerate(names_cand)}
+                        idxs = [name_to_idx[n] for n in species_names]
+                        S_eval = S_cand[:, idxs]
+                    else:
+                        S_eval = S_cand
+                    scores.append(_quick_fit_R2(y_eval, S_eval))
+                scores = np.asarray(scores, dtype=float)
+                i_best = int(np.argmax(scores)) if scores.size else 0
+                best_fwhm = float(fwhm_candidates[i_best]) if fwhm_candidates.size else center
+
+                ax = axes[3]
+                ax.set_title("FWHM Optimization", fontweight="bold")
+                ax.plot(fwhm_candidates, scores, "o-", color="purple")
+                ax.axvline(best_fwhm, color="red", linestyle="--", alpha=0.7, label=f"Best = {best_fwhm:.3f} nm")
+                ax.set_xlabel("FWHM (nm)")
+                ax.set_ylabel("Quick R²")
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+            except Exception:
+                # Fail silently if optimization cannot be visualized
+                pass
+
+        self._save_and_show(fig, self._get_next_filename("wavelength"), title)
 
     def plot_nnls_fitting(
         self,
@@ -601,8 +689,8 @@ class SpectrumVisualizer:
         title: str = "NNLS Fitting Results",
     ):
         """Step 10: Plot NNLS fitting results."""
-        fig = plt.figure(figsize=(18, 12))
-        gs = GridSpec(3, 3, figure=fig)
+        fig = plt.figure(figsize=(18, 14))
+        gs = GridSpec(4, 3, figure=fig)
 
         # Main fit plot
         ax_main = fig.add_subplot(gs[0, :])
@@ -637,17 +725,11 @@ class SpectrumVisualizer:
             [float(tve_lookup.get(name, 0.0)) for name in species_names], dtype=float
         )
         coeffs_all = np.asarray(coeffs, dtype=float)
-        # If we have meaningful TVE values, filter by TVE; otherwise by coefficient
+        # Show ALL non-zero TVE values; if no TVE data, fallback to non-zero coefficients
         if np.any(tve_all > 0):
-            max_tve = float(np.max(tve_all))
-            tve_thr = max(1e-4, 0.01 * max_tve)
-            sig_indices = [i for i in range(len(species_names)) if tve_all[i] >= tve_thr]
-            # If nothing passes, keep top 10 by TVE
-            if not sig_indices:
-                sig_indices = list(np.argsort(tve_all)[-10:])
+            sig_indices = [i for i in range(len(species_names)) if tve_all[i] > 0.0]
         else:
-            coeff_thr = 0.001 * float(np.max(coeffs_all)) if np.any(coeffs_all > 0) else 0.0
-            sig_indices = [i for i in range(len(species_names)) if coeffs_all[i] > coeff_thr]
+            sig_indices = [i for i in range(len(species_names)) if coeffs_all[i] > 0.0]
 
         # Build sortable tuples: (name, coeff, tve)
         sortable: List[Tuple[str, float, float]] = [
@@ -660,6 +742,9 @@ class SpectrumVisualizer:
         ]
         # Sort by TVE descending (stable fallback to coefficient if equal)
         sortable.sort(key=lambda t: (t[2], t[1]), reverse=True)
+        # Show at most top 8 entries
+        if len(sortable) > 8:
+            sortable = sortable[:8]
         sig_names = [t[0] for t in sortable]
         sig_coeffs = np.asarray([t[1] for t in sortable], dtype=float)
         sig_tve = np.asarray([t[2] for t in sortable], dtype=float)
@@ -703,14 +788,64 @@ class SpectrumVisualizer:
             ax_coeff.text(
                 0.5,
                 0.5,
-                "No significant\ncoefficients",
+                "No non-zero TVE or coefficients",
                 ha="center",
                 va="center",
                 transform=ax_coeff.transAxes,
                 fontsize=12,
                 alpha=0.6,
             )
-            ax_coeff.set_title("Coefficients", fontweight="bold")
+            ax_coeff.set_title("TVE", fontweight="bold")
+
+        # Coefficient bar plot (sorted by coefficient; show ALL non-zero coefficients)
+        ax_coeff_sorted = fig.add_subplot(gs[2, :])
+        nz_coeff_indices = [i for i in range(len(species_names)) if coeffs_all[i] > 0.0]
+        if len(nz_coeff_indices) > 0:
+            nz_coeff_indices.sort(key=lambda i: float(coeffs_all[i]), reverse=True)
+            # Show at most top 8 entries
+            nz_coeff_indices = nz_coeff_indices[:8]
+            coeff_names = [species_names[i] for i in nz_coeff_indices]
+            coeff_values = np.asarray([float(coeffs_all[i]) for i in nz_coeff_indices], dtype=float)
+
+            max_coeff = float(np.max(coeff_values)) if np.any(np.isfinite(coeff_values)) else 1.0
+            max_coeff = max(max_coeff, 1e-12)
+            norm2 = plt.Normalize(vmin=0.0, vmax=max_coeff)
+            cmap_plasma = plt.get_cmap("plasma")
+            colors2 = cmap_plasma(norm2(coeff_values))
+
+            bars2 = ax_coeff_sorted.barh(range(len(coeff_values)), coeff_values, color=colors2)
+            ax_coeff_sorted.set_yticks(range(len(coeff_values)))
+            ax_coeff_sorted.set_yticklabels(coeff_names)
+            ax_coeff_sorted.set_title("Species (coeff > 0, sorted by coefficient)", fontweight="bold")
+            ax_coeff_sorted.set_xlabel("Coefficient")
+            ax_coeff_sorted.set_xscale("linear")
+            ax_coeff_sorted.set_xlim(0.0, max_coeff * 1.05)
+            ax_coeff_sorted.invert_yaxis()
+            ax_coeff_sorted.grid(True, alpha=0.3)
+
+            for i, bar in enumerate(bars2):
+                text_x = float(bar.get_width()) * 1.01
+                text_x = min(max(text_x, 0.01), max_coeff * 1.05)
+                ax_coeff_sorted.text(
+                    text_x,
+                    bar.get_y() + bar.get_height() / 2,
+                    f"coef={coeff_values[i]:.3f}",
+                    va="center",
+                    ha="left",
+                    fontsize=9,
+                )
+        else:
+            ax_coeff_sorted.text(
+                0.5,
+                0.5,
+                "No non-zero coefficients",
+                ha="center",
+                va="center",
+                transform=ax_coeff_sorted.transAxes,
+                fontsize=12,
+                alpha=0.6,
+            )
+            ax_coeff_sorted.set_title("Coefficients", fontweight="bold")
 
         # Fit quality metrics
         ax_metrics = fig.add_subplot(gs[1, 2])
@@ -734,7 +869,7 @@ class SpectrumVisualizer:
 
         # Individual contributions (if templates available)
         if templates is not None and len(sig_names) > 0:
-            ax_contrib = fig.add_subplot(gs[2, :])
+            ax_contrib = fig.add_subplot(gs[3, :])
             ax_contrib.plot(
                 wl_grid, y_observed, "k-", linewidth=2, label="Observed", alpha=0.7
             )
@@ -1326,7 +1461,7 @@ class SpectrumVisualizer:
             pre.wl_grid, bands, templates, species_names, "Species Band Regions"
         )
 
-        # 09: Wavelength alignment optimization
+        # 09: Wavelength alignment optimization (and FWHM visualization)
         try:
             # Import locally to avoid any potential import cycles at module import time
             from ._detect import _search_best_shift  # type: ignore
@@ -1339,7 +1474,10 @@ class SpectrumVisualizer:
                 pre.y_cr,
                 y_shifted,
                 best_shift,
-                "Wavelength Shift Optimization",
+                "Wavelength Optimization",
+                ref=ref,
+                species_names=species_names,
+                config=config,
             )
         except Exception:
             # If shift computation is unavailable, skip this visualization gracefully

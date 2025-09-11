@@ -83,25 +83,40 @@ def continuum_upper_envelope(
 
 
 def _continuum_remove(
-    wl: np.ndarray, y: np.ndarray, strength: float, override_fn=None
+    wl: np.ndarray, y: np.ndarray, strength: float, override_fn=None, *, strategy: str = "arpls"
 ) -> Tuple[np.ndarray, np.ndarray]:
     if override_fn is not None:
         y_cr, baseline = override_fn(wl, y, strength)
         return np.asarray(y_cr, dtype=float), np.asarray(baseline, dtype=float)
 
-    # Default: ARPLS subtract first on raw signal, then divide by upper-envelope
+    # Strategy selection
+    st = (strategy or "arpls").lower().strip()
+    if st not in {"arpls", "rolling", "both"}:
+        st = "arpls"
+
+    # ARPLS baseline on original signal
     N = int(y.size)
     lam2 = (N / 200.0) ** 2 * 1e6 * (0.5 + strength)
     base_ar, _ = Baseline(wl).arpls(y, lam=lam2, max_iter=25, tol=1e-2)
     y_after_arpls = y - base_ar
-    cr_div, base_upper = continuum_upper_envelope(
+
+    if st == "arpls":
+        cr = y_after_arpls
+        _continuum_remove._last_div = (None, None)  # type: ignore
+        return cr.astype(float), np.asarray(base_ar, dtype=float)
+
+    # Rolling upper-envelope on ARPLS residual
+    cr_env, base_upper = continuum_upper_envelope(
         wl, y_after_arpls, strength=strength, mode="subtract"
     )
-    cr = cr_div
-    # Stash intermediates: pre-division residual and envelope used for division
     _continuum_remove._last_div = (y_after_arpls.astype(float), base_upper.astype(float))  # type: ignore
-    # Return final signal and the ARPLS baseline for top-row visualization
-    return cr.astype(float), np.asarray(base_ar, dtype=float)
+
+    if st == "rolling":
+        # If only rolling, use the envelope baseline as the baseline output for visualization
+        return cr_env.astype(float), np.asarray(base_upper, dtype=float)
+
+    # both: ARPLS then rolling; keep ARPLS baseline for top-row visualization
+    return cr_env.astype(float), np.asarray(base_ar, dtype=float)
 
 
 def _register_and_subtract(
@@ -115,8 +130,8 @@ def _register_and_subtract(
         return override_fn(wl, std_y, wl, bg_y, instr)
 
     # Continuum remove for registration stability
-    std_cr, _ = _continuum_remove(wl, std_y, strength=0.4, override_fn=None)
-    bg_cr, _ = _continuum_remove(wl, bg_y, strength=0.4, override_fn=None)
+    std_cr, _ = _continuum_remove(wl, std_y, strength=0.4, override_fn=None, strategy="both")
+    bg_cr, _ = _continuum_remove(wl, bg_y, strength=0.4, override_fn=None, strategy="both")
 
     shifts, _, _ = phase_cross_correlation(std_cr, bg_cr, upsample_factor=20)
     shift_samples = float(np.ravel(shifts)[0])
@@ -220,8 +235,8 @@ def preprocess(
     bg = _as_arrays(backgrounds) if backgrounds else []
 
     # Optional explicit/automatic wavelength trims (left/right)
-    ts = getattr(config, "trim", None)
-    if ts is not None and (
+    ts = config
+    if (
         getattr(ts, "min_wavelength_nm", None) is not None
         or getattr(ts, "max_wavelength_nm", None) is not None
         or getattr(ts, "auto_trim_left", False)
@@ -321,6 +336,7 @@ def preprocess(
         y_sub,
         strength=float(config.baseline_strength),
         override_fn=config.continuum_fn,
+        strategy=str(getattr(config, "continuum_strategy", "both")),
     )
 
     # Final non-negativity
