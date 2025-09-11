@@ -2,14 +2,14 @@
 
 Spectrum-analysis pipeline for emission spectra: preprocessing → template generation → NNLS-based species detection. 
 
-Public API: `AnalysisConfig`, `Instrument`, `Spectrum`, `analyze`.
+Public API: `AnalysisConfig`, `Spectrum`, `analyze`.
 
 ### Quickstart (see `run_with_library.py`)
 
 ```python
 from pathlib import Path
 
-from yrep_spectrum_analysis import AnalysisConfig, Instrument, analyze
+from yrep_spectrum_analysis import AnalysisConfig, analyze
 from yrep_spectrum_analysis.utils import load_batch, load_references, group_spectra
 
 base = Path(__file__).resolve().parent
@@ -26,7 +26,8 @@ measurements, backgrounds = load_batch(meas_root, bg_root)
 groups = group_spectra(measurements)
 
 cfg = AnalysisConfig(
-    instrument=Instrument(fwhm_nm=0.75, grid_step_nm=None, max_shift_nm=2),
+    fwhm_nm=0.75,
+    grid_step_nm=None,
     species=["Na", "K", "Ca", "Cu", "Zn", "Pb"],
     baseline_strength=0.5,
     continuum_strategy="both", # If data is good, try "arpls"
@@ -42,7 +43,7 @@ cfg = AnalysisConfig(
     # depending on data quality, the following can help a lot. try these values: 
     search_shift=False, 
     shift_search_iterations=0, # 10
-    shift_search_spread=0, # 2 (nm)
+    shift_search_spread=0, # absolute nm window
     search_fwhm=False,
     fwhm_search_iterations=0, # 10
     fwhm_search_spread=0, # 1 (nm)
@@ -72,15 +73,11 @@ Visualizer files are saved when `visualize=True` to `viz_output_dir`.
 
 ### Configuration reference
 
-- **Instrument**
-  - **fwhm_nm (float, default 2.0)**: Full width at half maximum used to broaden reference lines when building Gaussian templates. Also used to size band regions.
-  - **grid_step_nm (float | None, default None)**: Uniform interpolation step for the working wavelength grid. If `None`, derived from data (median positive spacing) with a minimum of ~1000 samples.
-  - **max_shift_nm (float, default 3.0)**: Maximum absolute wavelength shift considered by coarse alignment during detection.
-  - **average_n_points (int, optional)**: If set on the `Instrument` object (not part of the dataclass fields), controls how many samples the averaging grid uses when multiple spectra are averaged.
-
 - **AnalysisConfig**
-  - Core
-    - **instrument (Instrument)**: Instrument model and grid/shift limits.
+  - Instrument and core
+    - **fwhm_nm (float, default 2.0)**: Full width at half maximum used to broaden reference lines when building Gaussian templates; also sizes band regions.
+    - **grid_step_nm (float | None, default None)**: Uniform interpolation step for the working wavelength grid. If `None`, derived from data (median positive spacing) with a minimum of ~1000 samples.
+    - **average_n_points (int | None, default None)**: Averaging grid points when combining multiple spectra. If `None`, defaults to 1000 internally.
     - **species (list[str] | None)**: Optional whitelist of species symbols (case-insensitive base symbols) to consider.
   - Tweaks
     - **baseline_strength (float, default 0.5)**: 0..1 knob that scales continuum removal windows and smoothing. Larger = broader/lower baseline.
@@ -94,13 +91,13 @@ Visualizer files are saved when `visualize=True` to `viz_output_dir`.
     - **auto_trim_left (bool, default False)** / **auto_trim_right (bool, default False)**: Auto-detect and trim off extreme left/right spikes using slope heuristics.
   - Background handling
     - **align_background (bool, default False)**: If true, registers background to measurement via phase correlation before subtraction. If false, subtracts as-is.
-    - **background_fn (callable | None)**: Advanced override for background subtraction/registration. Signature `(wl, y_meas, wl_bg, y_bg, instrument) -> (y_sub, params_dict)`.
+    - **background_fn (callable | None)**: Advanced override for background subtraction/registration. Signature `(wl, y_meas, wl_bg, y_bg, config) -> (y_sub, params_dict)`.
   - Continuum override
     - **continuum_fn (callable | None)**: Advanced override for continuum removal. Signature `(wl, y, strength) -> (y_cr, baseline)`.
   - Search controls (coarse optimization inside detection)
     - **search_shift (bool, default True)**: Enable iterative coarse wavelength alignment of the observed signal to templates.
     - **shift_search_iterations (int, default 1)**: Number of refinement iterations; the shift step reduces each iteration.
-    - **shift_search_spread (float, default 1.0)**: Multiplier for the allowed shift window: search range = `±(max_shift_nm × shift_search_spread)`.
+    - **shift_search_spread (float, default 0.0)**: Absolute nm window for shift search: search range = `±shift_search_spread`. Set `<= 0` to disable.
     - **search_fwhm (bool, default True)**: Enable FWHM search by rebuilding templates around the current `fwhm_nm`.
     - **fwhm_search_iterations (int, default 1)**: Iterative narrowing of the candidate bracket around `fwhm_nm`.
     - **fwhm_search_spread (float, default 0.5)**: Relative bracket half-width for the first iteration: `width = fwhm_nm × fwhm_search_spread`.
@@ -110,7 +107,7 @@ Visualizer files are saved when `visualize=True` to `viz_output_dir`.
 ### API surface
 
 ```python
-from yrep_spectrum_analysis import AnalysisConfig, Instrument, Spectrum, analyze
+from yrep_spectrum_analysis import AnalysisConfig, Spectrum, analyze
 ```
 
 `analyze(measurements, references, *, backgrounds=None, config=None, visualize=False, viz_output_dir=None, viz_show=False)`

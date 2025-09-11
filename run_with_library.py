@@ -9,19 +9,24 @@ This is a demonstration of simplicity: no file writes, no plotting.
 from __future__ import annotations
 
 from pathlib import Path
+import numpy as np
 
 
-from yrep_spectrum_analysis import AnalysisConfig, analyze, Instrument
-from yrep_spectrum_analysis.utils import load_batch, load_references, group_spectra
+from yrep_spectrum_analysis import AnalysisConfig, analyze
+from yrep_spectrum_analysis.utils import (
+    load_batch,
+    load_references,
+    group_spectra,
+    is_junk_group,
+    spectrum_quality,
+    average_spectra
+)
 
 
 # Analysis configuration (explicitly sets all used fields)
 CFG = AnalysisConfig(
-    instrument=Instrument(
-        fwhm_nm=0.75,
-        grid_step_nm=None,  # use data-driven grid if None
-        max_shift_nm=2,  # used by wavelength shift search
-    ),
+    fwhm_nm=0.75,
+    grid_step_nm=None,  # use data-driven grid if None
     species=[
         "Na", "K", "Ca", "Li", "Cu", "Ba", "Sr", "Hg", "O", "N", "Al", "Mg", "Si", "Zn", "Pb", "Cd", "Ag", "Au", "Cr", "Mn", "Co", "Ni", "Ti", "Sn", "Sb", "As", "Se", "C", "B", "Fe", "H", "Ar"
     ],
@@ -43,11 +48,11 @@ CFG = AnalysisConfig(
     continuum_fn=None,
     # Search controls
     search_shift=True,
-    shift_search_iterations=10,
-    shift_search_spread=5,
+    shift_search_iterations=3,
+    shift_search_spread=0.5,  # absolute nm window
     search_fwhm=True,
-    fwhm_search_iterations=10,
-    fwhm_search_spread=1,
+    fwhm_search_iterations=3,
+    fwhm_search_spread=0.5,
 )
 
 
@@ -72,6 +77,16 @@ def main() -> None:
         for gi, group in enumerate(groups, start=1):
             output_dir = base / "plots" / std.lower() / f"group_{gi:02d}"
             output_dir.mkdir(parents=True, exist_ok=True)
+
+            junk = is_junk_group(group)
+            # Quality: mean per-spectrum and average-of-group quality
+            q_specs = [spectrum_quality(s) for s in group]
+            try:
+                avg = average_spectra(group, n_points=1000)
+                q_avg = spectrum_quality(avg)
+            except Exception:
+                q_avg = 0.0
+            print(f"   Group {gi}: junk={junk}; quality_mean={np.mean(q_specs):.3f}; quality_avg={q_avg:.3f}")
 
             result = analyze(
                 measurements=group,

@@ -21,7 +21,7 @@ import numpy as np
 import seaborn as sns
 from matplotlib.colors import LogNorm
 
-from yrep_spectrum_analysis import AnalysisConfig, Instrument, analyze
+from yrep_spectrum_analysis import AnalysisConfig, analyze
 from yrep_spectrum_analysis.types import Spectrum
 from yrep_spectrum_analysis.utils import load_references, load_txt_spectrum, group_spectra, is_junk_group
 
@@ -31,11 +31,8 @@ from yrep_spectrum_analysis.utils import load_references, load_txt_spectrum, gro
 # -------------------------
 def build_config() -> AnalysisConfig:
     return AnalysisConfig(
-        instrument=Instrument(
-            fwhm_nm=0.75,
-            grid_step_nm=None,
-            max_shift_nm=2,
-        ),
+        fwhm_nm=0.75,
+        grid_step_nm=None,
         species=["Cu", "Zn", "C", "Fe", "Ni", "Pb", "Sn", "Si", "Al", "Mg", "Ca", "Na", "K", "Cr", "Mn"],
         baseline_strength=0,
         regularization=0.0,
@@ -52,7 +49,7 @@ def build_config() -> AnalysisConfig:
         continuum_strategy = "arpls",
         search_shift=True,
         shift_search_iterations=2,
-        shift_search_spread=1,
+        shift_search_spread=0.5,  # absolute nm window
         search_fwhm=True,
         fwhm_search_iterations=2,
         fwhm_search_spread=0.5,

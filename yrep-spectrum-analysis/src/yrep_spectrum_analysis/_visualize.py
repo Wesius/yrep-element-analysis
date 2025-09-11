@@ -602,7 +602,7 @@ class SpectrumVisualizer:
         if show_fwhm:
             try:
                 # center and bracket
-                center = float(getattr(getattr(config, "instrument", object()), "fwhm_nm", 2.0))
+                center = float(getattr(config, "fwhm_nm", 2.0))
                 rel_spread = float(getattr(config, "fwhm_search_spread", 0.5))
                 width = max(1e-3, rel_spread * center)
                 iters = int(max(1, getattr(config, "fwhm_search_iterations", 1)))
@@ -1268,7 +1268,7 @@ class SpectrumVisualizer:
         y_range = float(np.max(y) - np.min(y)) if y.size else 0.0
         prom_thr = max(1e-12, 0.02 * y_range)
         step = (wl_grid[-1] - wl_grid[0]) / max(1, wl_grid.size - 1)
-        min_dist_nm = float(getattr(getattr(config, "instrument", object()), "fwhm_nm", 0.0)) if config is not None else 0.0
+        min_dist_nm = float(getattr(config, "fwhm_nm", 0.0)) if config is not None else 0.0
         distance_samples = int(max(1, round(min_dist_nm / step))) if min_dist_nm > 0 else 1
 
         idxs, props = find_peaks(y, prominence=prom_thr, distance=distance_samples)

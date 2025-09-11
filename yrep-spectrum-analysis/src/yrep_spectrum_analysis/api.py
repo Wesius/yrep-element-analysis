@@ -30,10 +30,10 @@ def detect(
     S, names = build_templates(
         ref,
         preprocessed.wl_grid,
-        fwhm_nm=config.instrument.fwhm_nm,
+        fwhm_nm=config.fwhm_nm,
         species_filter=config.species,
     )
-    bands = build_bands_index(ref, names, instrument=config.instrument)
+    bands = build_bands_index(ref, names, fwhm_nm=config.fwhm_nm)
     coeffs, y_fit, present, per_species_scores, R2 = nnls_detect(
         preprocessed.wl_grid, preprocessed.y_cr, S, names, bands=bands, config=config, ref=ref
     )
@@ -73,13 +73,8 @@ def analyze(
 
     # Prepare references/templates once
     ref = normalize_reference(references)
-    S, names = build_templates(
-        ref,
-        pre.wl_grid,
-        fwhm_nm=cfg.instrument.fwhm_nm,
-        species_filter=cfg.species,
-    )
-    bands = build_bands_index(ref, names, instrument=cfg.instrument)
+    S, names = build_templates(ref, pre.wl_grid, fwhm_nm=cfg.fwhm_nm, species_filter=cfg.species)
+    bands = build_bands_index(ref, names, fwhm_nm=cfg.fwhm_nm)
 
     coeffs, y_fit, present, per_species_scores, R2 = nnls_detect(
         pre.wl_grid, pre.y_cr, S, names, bands=bands, config=cfg, ref=ref

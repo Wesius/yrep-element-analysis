@@ -4,7 +4,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from .types import Instrument, RefLines
+from .types import RefLines
 
 
  
@@ -97,7 +97,7 @@ def build_templates(
 def build_bands_index(
     ref: RefLines,
     species_list: Sequence[str],
-    instrument: Instrument,
+    fwhm_nm: float,
     *,
     merge_distance_factor: float = 1.5,
     margin_factor: float = 1.25,
@@ -106,7 +106,7 @@ def build_bands_index(
 ) -> Dict[str, List[Tuple[float, float]]]:
     # Cluster lines per species using distance threshold (DBSCAN-like without dependency)
     bands: Dict[str, List[Tuple[float, float]]] = {}
-    fwhm = float(instrument.fwhm_nm)
+    fwhm = float(fwhm_nm)
     merge_dist = max(0.0, merge_distance_factor * fwhm)
     margin = max(0.0, margin_factor * fwhm)
 

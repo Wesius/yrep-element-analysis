@@ -7,7 +7,7 @@ from pybaselines import Baseline
 from skimage.registration import phase_cross_correlation
 
 
-from .types import AnalysisConfig, Instrument, PreprocessResult, Spectrum, SpectrumLike
+from .types import AnalysisConfig, PreprocessResult, Spectrum, SpectrumLike
 from .utils import average_spectra
 
 def _as_arrays(items: Sequence[SpectrumLike]) -> List[Spectrum]:
@@ -20,12 +20,12 @@ def _as_arrays(items: Sequence[SpectrumLike]) -> List[Spectrum]:
 
 
 def _uniform_grid_from_data(
-    wavelength_nm: np.ndarray, instr: Instrument, n_min: int = 1000
+    wavelength_nm: np.ndarray, grid_step_nm: Optional[float], n_min: int = 1000
 ) -> np.ndarray:
     wl_min = float(np.min(wavelength_nm))
     wl_max = float(np.max(wavelength_nm))
-    if instr.grid_step_nm and instr.grid_step_nm > 0:
-        step = float(instr.grid_step_nm)
+    if grid_step_nm and grid_step_nm > 0:
+        step = float(grid_step_nm)
     else:
         diffs = np.diff(wavelength_nm)
         step = (
@@ -123,11 +123,11 @@ def _register_and_subtract(
     wl: np.ndarray,
     std_y: np.ndarray,
     bg_y: np.ndarray,
-    instr: Instrument,
+    config: AnalysisConfig,
     override_fn=None,
 ) -> Tuple[np.ndarray, dict]:
     if override_fn is not None:
-        return override_fn(wl, std_y, wl, bg_y, instr)
+        return override_fn(wl, std_y, wl, bg_y, config)
 
     # Continuum remove for registration stability
     std_cr, _ = _continuum_remove(wl, std_y, strength=0.4, override_fn=None, strategy="both")
@@ -235,7 +235,7 @@ def preprocess(
         average_spectra(
             meas,
             n_points=max(
-                config.instrument.__dict__.get("average_n_points", 1000), 1000
+                (getattr(config, "average_n_points", None) or 1000), 1000
             ),
         )
         if len(meas) > 1
@@ -245,7 +245,7 @@ def preprocess(
         average_spectra(
             bg,
             n_points=max(
-                config.instrument.__dict__.get("average_n_points", 1000), 1000
+                (getattr(config, "average_n_points", None) or 1000), 1000
             ),
         )
         if bg
@@ -272,7 +272,7 @@ def preprocess(
             wl_src = avg_meas.wavelength
     else:
         wl_src = avg_meas.wavelength
-    wl_grid = _uniform_grid_from_data(wl_src, config.instrument, n_min=1000)
+    wl_grid = _uniform_grid_from_data(wl_src, getattr(config, "grid_step_nm", None), n_min=1000)
     y_meas = np.asarray(
         np.interp(wl_grid, avg_meas.wavelength, avg_meas.intensity), dtype=float
     )
@@ -298,7 +298,7 @@ def preprocess(
                 wl_grid,
                 y_meas,
                 y_bg,
-                config.instrument,
+                config,
                 override_fn=config.background_fn,
             )
         else:

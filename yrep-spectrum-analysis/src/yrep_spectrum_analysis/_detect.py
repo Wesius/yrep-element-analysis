@@ -26,16 +26,15 @@ def _search_best_shift(
     step_factor: float = 1.0,
 ) -> Tuple[float, np.ndarray]:
     """Grid-search a small wavelength shift that maximizes R^2 of a quick NNLS fit."""
-    if (
-        not np.isfinite(config.instrument.max_shift_nm)
-        or config.instrument.max_shift_nm <= 0
-    ):
+    # Use search_shift_spread directly as absolute nm range; if <=0, disable search
+    spread_nm = float(getattr(config, "shift_search_spread", 0.0))
+    if not np.isfinite(spread_nm) or spread_nm <= 0:
         return 0.0, y_cr
     # step equals grid step × step_factor
     step_nm = (wl_grid_nm[-1] - wl_grid_nm[0]) / max(1, wl_grid_nm.size - 1)
     step_nm = max(step_nm * step_factor, step_nm)
-    spread = float(getattr(config, "shift_search_spread", 1.0))
-    max_shift = max(0.0, float(config.instrument.max_shift_nm)) * max(0.0, spread)
+    # Absolute range determined solely by spread_nm (user-provided nm window)
+    max_shift = max(0.0, float(spread_nm))
     shifts = np.arange(-max_shift, max_shift + 1e-12, step_nm)
     best_R2, best_shift, best_y = -np.inf, 0.0, y_cr
     # lightweight bounded LS to evaluate candidates

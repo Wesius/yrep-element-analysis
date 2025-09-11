@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Protocol, Tuple, Union
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional, Protocol, Tuple, Union, Any
 import numpy as np
 
 
@@ -26,13 +26,6 @@ class Spectrum:
             raise ValueError("spectrum cannot be empty")
 
 
-@dataclass(frozen=True)
-class Instrument:
-    fwhm_nm: float = 2.0
-    grid_step_nm: Optional[float] = None
-    max_shift_nm: float = 3.0
-
-
 @dataclass
 class RefLines:
     species: List[str]
@@ -41,8 +34,9 @@ class RefLines:
 
 
 # Optional user overrides (advanced), each receives arrays and returns arrays
+# The last argument provides access to configuration
 BackgroundFn = Callable[
-    [np.ndarray, np.ndarray, np.ndarray, np.ndarray, Instrument],
+    [np.ndarray, np.ndarray, np.ndarray, np.ndarray, Any],
     Tuple[np.ndarray, Dict[str, float]],
 ]
 ContinuumFn = Callable[[np.ndarray, np.ndarray, float], Tuple[np.ndarray, np.ndarray]]
@@ -50,8 +44,12 @@ ContinuumFn = Callable[[np.ndarray, np.ndarray, float], Tuple[np.ndarray, np.nda
 
 @dataclass
 class AnalysisConfig:
+    # Instrument parameters
+    fwhm_nm: float = 2.0
+    grid_step_nm: Optional[float] = None
+    # Optional averaging grid control when combining multiple spectra
+    average_n_points: Optional[int] = None
     # Core
-    instrument: Instrument = field(default_factory=Instrument)
     species: Optional[List[str]] = None  # optional species filter
 
     # Tweaks (coarse knobs)
@@ -84,8 +82,8 @@ class AnalysisConfig:
     search_fwhm: bool = True
     fwhm_search_iterations: int = 1
     # Search spreads
-    # For shift (nm): search in [-max_shift_nm*shift_search_spread, +...]
-    shift_search_spread: float = 1.0
+    # For shift (nm): absolute search window in nm, range = [-spread, +spread]
+    shift_search_spread: float = 0.0
     # For FWHM (relative): bracket width = fwhm_nm * fwhm_search_spread
     fwhm_search_spread: float = 0.5
 
