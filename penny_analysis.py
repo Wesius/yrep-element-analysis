@@ -19,10 +19,11 @@ from typing import Dict, List, Sequence, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+from matplotlib.colors import LogNorm
 
 from yrep_spectrum_analysis import AnalysisConfig, Instrument, analyze
 from yrep_spectrum_analysis.types import Spectrum
-from yrep_spectrum_analysis.utils import load_references, load_txt_spectrum
+from yrep_spectrum_analysis.utils import load_references, load_txt_spectrum, group_spectra, is_junk_group
 
 
 # -------------------------
@@ -50,10 +51,10 @@ def build_config() -> AnalysisConfig:
         continuum_fn=None,
         continuum_strategy = "arpls",
         search_shift=True,
-        shift_search_iterations=5,
-        shift_search_spread=3,
+        shift_search_iterations=2,
+        shift_search_spread=1,
         search_fwhm=True,
-        fwhm_search_iterations=5,
+        fwhm_search_iterations=2,
         fwhm_search_spread=0.5,
     )
 
@@ -198,6 +199,221 @@ def save_aggregate_summary(results: Sequence[RunResult], out_dir: Path) -> None:
     plt.close(fig)
 
 
+def save_year_species_heatmap(
+    per_kind_year_species_scores: Dict[str, Dict[str, Dict[str, List[float]]]],
+    out_dir: Path,
+) -> None:
+    """Year × Species FVE heatmap for circ vs uncirc."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Get union of all years and species
+    all_years = sorted(set(
+        y for kind_data in per_kind_year_species_scores.values()
+        for y in kind_data.keys()
+    ), key=lambda y: int(y))
+    
+    # Get top 20 species by total FVE across both conditions
+    all_species_sums: Dict[str, float] = {}
+    for kind_data in per_kind_year_species_scores.values():
+        for year_data in kind_data.values():
+            for sp, vals in year_data.items():
+                all_species_sums[sp] = all_species_sums.get(sp, 0.0) + sum(vals)
+    
+    top_species = [sp for sp, _ in sorted(all_species_sums.items(), 
+                                          key=lambda t: t[1], reverse=True)[:20]]
+    
+    if not all_years or not top_species:
+        return
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
+    
+    for ax, kind in [(ax1, "circ"), (ax2, "uncirc")]:
+        # Build matrix
+        matrix = np.zeros((len(top_species), len(all_years)))
+        for i, sp in enumerate(top_species):
+            for j, year in enumerate(all_years):
+                vals = per_kind_year_species_scores.get(kind, {}).get(year, {}).get(sp, [])
+                if vals:
+                    matrix[i, j] = float(np.mean(vals))
+                else:
+                    matrix[i, j] = np.nan
+        
+        # Plot heatmap with log scale
+        # Add small epsilon to avoid log(0)
+        matrix_log = matrix.copy()
+        matrix_log[matrix_log == 0] = 1e-10
+        
+        # Use LogNorm for better visibility of trace amounts
+        vmin = 1e-6  # Minimum visible FVE
+        vmax = np.nanmax(matrix) if np.any(np.isfinite(matrix)) else 1
+        
+        sns.heatmap(
+            matrix,
+            xticklabels=all_years,
+            yticklabels=top_species,
+            cmap="YlOrRd",
+            cbar_kws={"label": "Mean FVE (log scale)"},
+            ax=ax,
+            norm=LogNorm(vmin=vmin, vmax=vmax),
+            linewidths=0.5,
+            linecolor='gray',
+        )
+        ax.set_title(f"Year × Species FVE Heatmap ({kind.upper()})", fontweight="bold")
+        ax.set_xlabel("Year")
+        ax.set_ylabel("Species")
+        
+        # Rotate x labels
+        ax.tick_params(axis='x', rotation=45)
+    
+    fig.suptitle("Species FVE Across Years: Circ vs Uncirc", fontsize=16, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(out_dir / "02_year_species_heatmap.png", dpi=300)
+    plt.close(fig)
+
+
+def save_stacked_area_composition(
+    per_kind_year_species_scores: Dict[str, Dict[str, Dict[str, List[float]]]],
+    out_dir: Path,
+) -> None:
+    """Stacked area chart showing composition over time."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
+    
+    for ax, kind in [(ax1, "circ"), (ax2, "uncirc")]:
+        kind_data = per_kind_year_species_scores.get(kind, {})
+        if not kind_data:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center", alpha=0.6)
+            ax.set_title(f"Composition Over Time ({kind.upper()})", fontweight="bold")
+            continue
+        
+        # Get years in order
+        years = sorted(kind_data.keys(), key=lambda y: int(y))
+        x_years = np.array([int(y) for y in years])
+        
+        # Calculate total FVE per species
+        species_totals: Dict[str, float] = {}
+        for year_data in kind_data.values():
+            for sp, vals in year_data.items():
+                species_totals[sp] = species_totals.get(sp, 0.0) + sum(vals)
+        
+        # Get top 10 species
+        top_species = [sp for sp, _ in sorted(species_totals.items(), 
+                                             key=lambda t: t[1], reverse=True)[:10]]
+        
+        # Build matrix for stacked area
+        matrix = []
+        for sp in top_species:
+            series = []
+            for year in years:
+                vals = kind_data.get(year, {}).get(sp, [])
+                if vals:
+                    series.append(float(np.sum(vals)))
+                else:
+                    series.append(0.0)
+            matrix.append(series)
+        
+        # Normalize to percentages
+        matrix = np.array(matrix)
+        totals = np.sum(matrix, axis=0)
+        totals[totals == 0] = 1.0  # Avoid division by zero
+        matrix_pct = matrix / totals * 100
+        
+        # Plot stacked area with varied colors
+        # Use tab20 colormap for more color variety
+        colors = plt.cm.tab20(np.linspace(0, 1, len(top_species)))
+        
+        ax.stackplot(x_years, matrix_pct, labels=top_species, colors=colors, alpha=0.9)
+        ax.set_title(f"Composition Over Time ({kind.upper()})", fontweight="bold")
+        ax.set_xlabel("Year")
+        ax.set_ylabel("Composition (%)")
+        ax.set_ylim(0, 100)
+        ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+        ax.grid(True, alpha=0.3)
+    
+    fig.suptitle("Species Composition Evolution: Circ vs Uncirc", fontsize=16, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(out_dir / "03_stacked_area_composition.png", dpi=300)
+    plt.close(fig)
+
+
+def save_species_cooccurrence(
+    all_results: List[RunResult],
+    out_dir: Path,
+    threshold: float = 0.0,
+) -> None:
+    """Species co-occurrence heatmap."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Split results by condition
+    circ_results = [r for r in all_results if "circ_" in r.label.lower() and "uncirc" not in r.label.lower()]
+    uncirc_results = [r for r in all_results if "uncirc" in r.label.lower()]
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
+    
+    for ax, results, kind in [(ax1, circ_results, "circ"), (ax2, uncirc_results, "uncirc")]:
+        # Get all detected species
+        all_species = set()
+        for r in results:
+            for d in r.detections:
+                if float(d.get("score", d.get("fve", 0.0))) >= threshold:
+                    sp = str(d.get("species", "?")).strip().split()[0].upper()
+                    all_species.add(sp)
+        
+        species_list = sorted(list(all_species))
+        if not species_list:
+            ax.text(0.5, 0.5, "No detections", ha="center", va="center", alpha=0.6)
+            ax.set_title(f"Co-occurrence ({kind.upper()})", fontweight="bold")
+            continue
+        
+        # Build co-occurrence matrix
+        n = len(species_list)
+        matrix = np.zeros((n, n))
+        
+        for r in results:
+            detected = set()
+            for d in r.detections:
+                if float(d.get("score", d.get("fve", 0.0))) >= threshold:
+                    sp = str(d.get("species", "?")).strip().split()[0].upper()
+                    if sp in all_species:
+                        detected.add(sp)
+            
+            # Update co-occurrence counts
+            for i, sp1 in enumerate(species_list):
+                for j, sp2 in enumerate(species_list):
+                    if sp1 in detected and sp2 in detected:
+                        matrix[i, j] += 1
+        
+        # Normalize by total runs
+        if len(results) > 0:
+            matrix = matrix / len(results)
+        
+        # Plot heatmap
+        sns.heatmap(
+            matrix,
+            xticklabels=species_list,
+            yticklabels=species_list,
+            cmap="Blues",
+            vmin=0,
+            vmax=1,
+            square=True,
+            cbar_kws={"label": "Co-occurrence Frequency"},
+            ax=ax,
+            linewidths=0.5,
+            linecolor='gray',
+        )
+        ax.set_title(f"Species Co-occurrence ({kind.upper()})", fontweight="bold")
+        
+        # Rotate labels
+        ax.tick_params(axis='x', rotation=45)
+        ax.tick_params(axis='y', rotation=0)
+    
+    fig.suptitle("Species Co-occurrence Patterns: Circ vs Uncirc", fontsize=16, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(out_dir / "04_species_cooccurrence.png", dpi=300)
+    plt.close(fig)
+
+
 def save_composition_over_time(
     per_year_species_scores: Dict[str, Dict[str, List[float]]],
     out_dir: Path,
@@ -330,22 +546,80 @@ def main() -> None:
         meas = _load_spectra_dir_filtered(s.meas_root)
         bg = _load_spectra_dir_filtered(s.bg_root)
         print(f"   Loaded {len(meas)} measurement(s), {len(bg)} background(s)")
-
-        # Visualization for every 10th run
+        
+        # Group spectra
+        groups = group_spectra(meas)
+        print(f"   Found {len(groups)} spectral group(s)")
+        
+        if not groups:
+            print("   No groups found, skipping this measurement set")
+            continue
+        
+        # Analyze only non-junk groups to find best R²
+        best_result = None
+        best_r2 = -1.0
+        best_group_idx = -1
+        non_junk_groups = []
+        
+        for g_idx, group in enumerate(groups):
+            is_junk = is_junk_group(group, debug=False)
+            status = "JUNK" if is_junk else "OK"
+            
+            if is_junk:
+                print(f"   Group {g_idx + 1} ({status}, {len(group)} spectra): skipped")
+                continue
+                
+            print(f"   Analyzing group {g_idx + 1} ({status}, {len(group)} spectra)...")
+            non_junk_groups.append((g_idx, group))
+            
+            try:
+                # Run analysis without visualization to get R²
+                temp_result = analyze(
+                    measurements=group,
+                    references=refs,
+                    backgrounds=bg if bg else None,
+                    config=cfg,
+                    visualize=False,
+                    viz_show=False,
+                )
+                
+                temp_r2 = float(temp_result.metrics.get("fit_R2", 0.0))
+                print(f"     R²={temp_r2:.4f}")
+                
+                if temp_r2 > best_r2:
+                    best_r2 = temp_r2
+                    best_result = temp_result
+                    best_group_idx = g_idx
+                    
+            except Exception as e:
+                print(f"     Failed to analyze: {e}")
+                continue
+        
+        if best_result is None:
+            print("   No valid (non-junk) groups found or all analyses failed, skipping this measurement set")
+            continue
+        
+        print(f"   Selected group {best_group_idx + 1} with highest R²={best_r2:.4f}")
+        
+        # Use the best result
+        result = best_result
+        
+        # Re-run visualization for selected group if needed
         visualize_this = (idx % 10 == 0)
-        viz_dir = base / "plots" / "pennies" / s.year / s.meas_root.name
         if visualize_this:
+            viz_dir = base / "plots" / "pennies" / s.year / s.meas_root.name
             viz_dir.mkdir(parents=True, exist_ok=True)
-
-        result = analyze(
-            measurements=meas,
-            references=refs,
-            backgrounds=bg if bg else None,
-            config=cfg,
-            visualize=visualize_this,
-            viz_output_dir=str(viz_dir) if visualize_this else None,
-            viz_show=False,
-        )
+            print("   Re-running best group with visualization...")
+            
+            result = analyze(
+                measurements=groups[best_group_idx],
+                references=refs,
+                backgrounds=bg if bg else None,
+                config=cfg,
+                visualize=True,
+                viz_output_dir=str(viz_dir),
+                viz_show=False,
+            )
 
         r2 = float(result.metrics.get("fit_R2", 0.0))
         print(f"   R²={r2:.4f}; detections={len(result.detections)}")
@@ -447,6 +721,11 @@ def main() -> None:
         filename_suffix="uncirc",
     )
     print(f"\nSaved aggregate summary to {summary_dir}")
+    
+    # Save additional visualizations
+    save_year_species_heatmap(per_kind_year_species_scores, summary_dir)
+    save_stacked_area_composition(per_kind_year_species_scores, summary_dir)
+    save_species_cooccurrence(all_results, summary_dir)
 
     # -------------------------
     # Detailed metrics (printed)

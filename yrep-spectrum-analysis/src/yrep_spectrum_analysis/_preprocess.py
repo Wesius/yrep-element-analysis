@@ -8,7 +8,7 @@ from skimage.registration import phase_cross_correlation
 
 
 from .types import AnalysisConfig, Instrument, PreprocessResult, Spectrum, SpectrumLike
-
+from .utils import average_spectra
 
 def _as_arrays(items: Sequence[SpectrumLike]) -> List[Spectrum]:
     out: List[Spectrum] = []
@@ -209,22 +209,6 @@ def _trim_spectrum(spec: Spectrum, wl_min_keep: float, wl_max_keep: float) -> Sp
     return Spectrum(wavelength=spec.wavelength[mask], intensity=spec.intensity[mask])
 
 
-    # Average measurement and background on overlap grid
-def _average_spectra(
-        specs: List[Spectrum], n_points: Optional[int] = None
-) -> Spectrum:
-    if len(specs) == 1:
-        return specs[0]
-    all_wl = [s.wavelength for s in specs]
-    wl_min = max(w.min() for w in all_wl)
-    wl_max = min(w.max() for w in all_wl)
-    if wl_min >= wl_max:
-        raise ValueError("spectra have no overlapping wavelength range")
-    n_points = n_points or 1000
-    wl_common = np.linspace(wl_min, wl_max, n_points)
-    intens = [np.interp(wl_common, s.wavelength, s.intensity) for s in specs]
-    avg = np.mean(np.stack(intens, axis=0), axis=0)
-    return Spectrum(wavelength=wl_common, intensity=avg)
 
 def preprocess(
     measurements: Sequence[SpectrumLike],
@@ -248,7 +232,7 @@ def preprocess(
 
 
     avg_meas = (
-        _average_spectra(
+        average_spectra(
             meas,
             n_points=max(
                 config.instrument.__dict__.get("average_n_points", 1000), 1000
@@ -258,7 +242,7 @@ def preprocess(
         else meas[0]
     )
     avg_bg = (
-        _average_spectra(
+        average_spectra(
             bg,
             n_points=max(
                 config.instrument.__dict__.get("average_n_points", 1000), 1000

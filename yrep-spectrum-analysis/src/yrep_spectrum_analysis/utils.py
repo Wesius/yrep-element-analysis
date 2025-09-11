@@ -1,12 +1,30 @@
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple
+from typing import List, Sequence, Tuple, Optional
 import numpy as np
 import pandas as pd
 from pathlib import Path
 import glob
 
 from .types import Spectrum, SpectrumLike
+
+
+    # Average measurement and background on overlap grid
+def average_spectra(
+        specs: List[Spectrum], n_points: Optional[int] = None
+) -> Spectrum:
+    if len(specs) == 1:
+        return specs[0]
+    all_wl = [s.wavelength for s in specs]
+    wl_min = max(w.min() for w in all_wl)
+    wl_max = min(w.max() for w in all_wl)
+    if wl_min >= wl_max:
+        raise ValueError("spectra have no overlapping wavelength range")
+    n_points = n_points or 1000
+    wl_common = np.linspace(wl_min, wl_max, n_points)
+    intens = [np.interp(wl_common, s.wavelength, s.intensity) for s in specs]
+    avg = np.mean(np.stack(intens, axis=0), axis=0)
+    return Spectrum(wavelength=wl_common, intensity=avg)
 
 
 def group_spectra(measurements: Sequence[SpectrumLike]) -> List[List[Spectrum]]:
@@ -78,6 +96,135 @@ def group_spectra(measurements: Sequence[SpectrumLike]) -> List[List[Spectrum]]:
         groups.append([specs[i] for i in idxs])
 
     return groups
+
+
+# -------------------------
+# Quality assessment
+# -------------------------
+
+
+def is_junk_group(measurements: Sequence[SpectrumLike], *, debug: bool = True) -> bool:
+    """
+    Minimal junk detector with two simple rules:
+      1) Junk if the averaged spectrum has no significant peaks above a robust threshold
+         (median + 6 * MAD), where a peak is at least 2 consecutive bins above threshold.
+      2) Junk if "too many" bins are above threshold (not a few sharp spikes):
+         either >3% of bins above threshold or >15 distinct peaks.
+    """
+    if not measurements:
+        if debug:
+            print("[junk] reason=empty_group")
+        return True
+
+    # Convert inputs
+    specs: List[Spectrum] = []
+    for it in measurements:
+        specs.append(
+            Spectrum(
+                wavelength=np.asarray(it.wavelength, dtype=float),
+                intensity=np.asarray(it.intensity, dtype=float),
+            )
+        )
+
+    # Average on overlap grid; if it fails, treat as junk
+    try:
+        avg = average_spectra(specs, n_points=1000)
+    except Exception as e:
+        if debug:
+            print(f"[junk] reason=average_failure error={e}")
+        return True
+
+    y = np.asarray(avg.intensity, dtype=float)
+    if y.size == 0 or not np.all(np.isfinite(y)):
+        if debug:
+            print("[junk] reason=invalid_average")
+        return True
+
+    # Robust threshold: median + 6 * MAD (match quality function)
+    med = float(np.median(y))
+    mad = 1.4826 * float(np.median(np.abs(y - med)) + 1e-12)
+    thr = med + 6.0 * mad
+    above = y > thr
+    if not np.any(above):
+        if debug:
+            print(f"[junk] reason=no_significant_peaks thr={thr:.6g}")
+        return True
+    # Count contiguous runs (peak widths)
+    idx = np.where(above)[0]
+    widths: List[int] = []
+    i = 0
+    while i < idx.size:
+        j = i + 1
+        while j < idx.size and (idx[j] - idx[j - 1]) == 1:
+            j += 1
+        widths.append(int(idx[j - 1] - idx[i] + 1))
+        i = j
+    peaks_ge2 = int(np.sum(np.asarray(widths, dtype=int) >= 2))
+    # print(f"[junk] widths: ", str(len(widths)))
+    if peaks_ge2 <= 0:
+        if debug:
+            print("[junk] reason=only_single_bin_spikes (no 2-bin peaks)")
+        return True
+
+    # Density rule: too many bins/peaks above threshold → junk (no longer "few spikes")
+    frac_bins = float(np.mean(above))
+    if frac_bins > 0.03 or len(widths) > 19:
+        if debug:
+            print(f"[junk] reason=excess_spike_density frac_bins={frac_bins:.4f} peaks={len(widths)}")
+        return True
+
+    return False
+
+
+# ---------------------------------
+# Data quality scoring (single spec)
+# ---------------------------------
+
+
+def spectrum_quality(spec: SpectrumLike) -> float:
+    """
+    Return a quality score in [0, 1] for a single spectrum.
+
+    High score when the baseline is flat and there are a few sharp spikes.
+    Implementation is intentionally simple and robust.
+    """
+    wl = np.asarray(spec.wavelength, dtype=float)
+    y = np.asarray(spec.intensity, dtype=float)
+    if y.size == 0 or not np.all(np.isfinite(y)) or not np.all(np.isfinite(wl)):
+        return 0.0
+
+    med = float(np.median(y))
+    mad = 1.4826 * float(np.median(np.abs(y - med)) + 1e-12)
+    thr = med + 6.0 * mad
+    above = y > thr
+    if not np.any(above):
+        return 0.0
+
+    # Sparsity of spikes: fewer bins above threshold is better
+    frac_bins = float(np.mean(above))
+    sparsity_score = float(np.exp(-frac_bins / 0.01))  # ~1 if <1% bins, falls quickly
+
+    # Peak prominence: taller spikes vs noise are better
+    height_ratio = float((float(np.max(y)) - thr) / (6.0 * mad + 1e-12))
+    prominence_score = float(np.tanh(max(0.0, height_ratio)))  # maps [0, inf) -> [0, 1)
+
+    # Width penalty: single-bin spikes should not score as perfect quality
+    # approximate spike width using run-length of consecutive bins above threshold
+    idx = np.where(above)[0]
+    widths: List[int] = []
+    i = 0
+    while i < idx.size:
+        j = i + 1
+        while j < idx.size and (idx[j] - idx[j - 1]) == 1:
+            j += 1
+        widths.append(int(idx[j - 1] - idx[i] + 1))
+        i = j
+    median_width = float(np.median(widths)) if widths else 1.0
+    # prefer narrow spikes but not 1-bin noise; ideal width around 2–5 bins
+    width_penalty = float(np.exp(-abs(median_width - 3.0) / 3.0))
+
+    score = 0.4 * sparsity_score + 0.4 * prominence_score + 0.2 * width_penalty
+    return float(np.clip(score, 0.0, 1.0))
 
 
 # -------------------------
