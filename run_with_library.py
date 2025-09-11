@@ -59,9 +59,9 @@ CFG = AnalysisConfig(
 def main() -> None:
     base = Path(__file__).resolve().parent
     lists_dir = base / "data" / "lists"
-    refs = load_references(lists_dir)
+    refs = load_references(lists_dir, element_only=False)
 
-    for std in ["Copper", "StandardA", "StandardB", "StandardC"]: #     for std in ["StandardA", "StandardB", "StandardC", "StandardD"]:
+    for std in ["Copper", "StandardA", "StandardB", "StandardC", "StandardD"]: #     for std in ["StandardA", "StandardB", "StandardC", "StandardD"]:
         print(f"\nProcessing {std}...")
         std_dir = base / "data" / "StandardsTest" / std
         meas_root = (
@@ -76,7 +76,6 @@ def main() -> None:
         print(f"   Split into {len(groups)} group(s)")
         for gi, group in enumerate(groups, start=1):
             output_dir = base / "plots" / std.lower() / f"group_{gi:02d}"
-            output_dir.mkdir(parents=True, exist_ok=True)
 
             junk = is_junk_group(group)
             # Quality: mean per-spectrum and average-of-group quality
@@ -87,6 +86,11 @@ def main() -> None:
             except Exception:
                 q_avg = 0.0
             print(f"   Group {gi}: junk={junk}; quality_mean={np.mean(q_specs):.3f}; quality_avg={q_avg:.3f}")
+
+            # Skip analysis for junk groups
+            if junk:
+                print(f"   Group {gi}: Skipping analysis (identified as junk)")
+                continue
 
             result = analyze(
                 measurements=group,

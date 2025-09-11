@@ -7,13 +7,6 @@ import pandas as pd
 from .types import RefLines
 
 
- 
-
-
-def _base(sym: str) -> str:
-    return str(sym).strip().split()[0].upper() if sym else ""
-
-
 def normalize_reference(
     ref: Union[
         "pd.DataFrame",
@@ -58,15 +51,17 @@ def build_templates(
 ) -> Tuple[np.ndarray, List[str]]:
     # Build per-species templates via Gaussian broadening
     sigma = float(fwhm_nm) / (2.0 * np.sqrt(2.0 * np.log(2.0)))
-    names_all = sorted(set(_base(s) for s in ref.species))
+    # Exact-label behavior: assume species labels in ref are already normalized/formatted
+    labels = [str(s).strip().upper() for s in ref.species]
+    names_all = sorted(set(labels))
     if species_filter is not None and len(species_filter) > 0:
-        filt = {_base(s) for s in species_filter}
+        filt = {str(s).strip().upper() for s in species_filter}
         names = [n for n in names_all if n in filt]
     else:
         names = names_all
     S_cols: List[np.ndarray] = []
     for sp in names:
-        mask = np.asarray([_base(s) == sp for s in ref.species], dtype=bool)
+        mask = np.asarray([str(s).strip().upper() == sp for s in ref.species], dtype=bool)
         lines_wl = ref.wavelength_nm[mask]
         lines_w = ref.intensity[mask]
         if lines_wl.size == 0:
@@ -109,10 +104,11 @@ def build_bands_index(
     fwhm = float(fwhm_nm)
     merge_dist = max(0.0, merge_distance_factor * fwhm)
     margin = max(0.0, margin_factor * fwhm)
+    labels_upper = [str(s).strip().upper() for s in ref.species]
 
     for sp in species_list:
-        spb = _base(sp)
-        mask = np.asarray([_base(s) == spb for s in ref.species], dtype=bool)
+        spu = str(sp).strip().upper()
+        mask = np.asarray([lu == spu for lu in labels_upper], dtype=bool)
         wl = np.sort(ref.wavelength_nm[mask].astype(float))
         inten = ref.intensity[mask].astype(float)
         if wl.size == 0:

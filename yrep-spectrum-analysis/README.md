@@ -15,7 +15,7 @@ from yrep_spectrum_analysis.utils import load_batch, load_references, group_spec
 base = Path(__file__).resolve().parent
 
 # 1) Load reference line lists (CSV directory with wavelength/species/intensity)
-refs = load_references(base / "data" / "lists")
+refs = load_references(base / "data" / "lists", element_only=True)
 
 # 2) Load spectra (directories of .txt files)
 meas_root = base / "data" / "StandardsTest" / "Copper" / "Copper"
@@ -119,13 +119,13 @@ from yrep_spectrum_analysis import AnalysisConfig, Spectrum, analyze
 - `viz_show`: show plots interactively
 
 Utilities used in the example:
-- `utils.load_references(lists_dir)`: reads CSVs with line lists and returns a normalized DataFrame
+- `utils.load_references(lists_dir, element_only=True)`: reads CSVs with line lists and returns a normalized DataFrame. When `element_only=True` (default), species like "Fe I"/"Fe II" are collapsed to base symbols ("FE"). Set `element_only=False` to keep ionization states ("FE I", "FE II") and build per-ion templates.
 - `utils.load_batch(meas_root, bg_root)`: reads `.txt` spectra into `Spectrum` objects
 - `utils.group_spectra(measurements)`: clusters similar spectra to process them as groups
 
 ### Notes
 
-- Species names are normalized to base symbols (e.g., "Fe I" → "FE").
+- Species normalization: by default `load_references(..., element_only=True)` collapses species to base symbols (e.g., "Fe I" → "FE"). If you need ion-specific templates, call `load_references(..., element_only=False)`. Filtering via `AnalysisConfig.species` always accepts base symbols (e.g., "Fe") and will match either collapsed or ion-specific references.
 - When `top_k <= 0`, all detections are returned in score-descending order.
 - Visualization saves numbered PNGs for each step of the pipeline.
 

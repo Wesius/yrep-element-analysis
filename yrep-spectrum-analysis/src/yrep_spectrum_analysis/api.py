@@ -11,6 +11,7 @@ from .types import (
 )
 from ._preprocess import preprocess as _preprocess_impl
 from ._templates import build_bands_index, build_templates, normalize_reference
+from .utils import expand_species_filter
 from ._detect import nnls_detect
 from ._visualize import SpectrumVisualizer
 
@@ -27,14 +28,18 @@ def detect(
     preprocessed: PreprocessResult, references, config: AnalysisConfig
 ) -> DetectionResult:
     ref = normalize_reference(references)
+    # Expand species filter: if user passed base elements (e.g., "FE"), but
+    # references include ionization (e.g., "FE I", "FE II"), expand to exact labels.
+    species_filter = expand_species_filter(ref.species, config.species)
+
     S, names = build_templates(
         ref,
         preprocessed.wl_grid,
         fwhm_nm=config.fwhm_nm,
-        species_filter=config.species,
+        species_filter=species_filter,
     )
     bands = build_bands_index(ref, names, fwhm_nm=config.fwhm_nm)
-    coeffs, y_fit, present, per_species_scores, R2 = nnls_detect(
+    coeffs, y_fit, present, per_species_scores, R2, _S_used = nnls_detect(
         preprocessed.wl_grid, preprocessed.y_cr, S, names, bands=bands, config=config, ref=ref
     )
     return DetectionResult(
@@ -73,10 +78,11 @@ def analyze(
 
     # Prepare references/templates once
     ref = normalize_reference(references)
-    S, names = build_templates(ref, pre.wl_grid, fwhm_nm=cfg.fwhm_nm, species_filter=cfg.species)
+    species_filter = expand_species_filter(ref.species, cfg.species)
+    S, names = build_templates(ref, pre.wl_grid, fwhm_nm=cfg.fwhm_nm, species_filter=species_filter)
     bands = build_bands_index(ref, names, fwhm_nm=cfg.fwhm_nm)
 
-    coeffs, y_fit, present, per_species_scores, R2 = nnls_detect(
+    coeffs, y_fit, present, per_species_scores, R2, S_used = nnls_detect(
         pre.wl_grid, pre.y_cr, S, names, bands=bands, config=cfg, ref=ref
     )
     det = DetectionResult(
@@ -104,7 +110,7 @@ def analyze(
             backgrounds=backgrounds,
             pre=pre,
             ref=ref,
-            templates=S,
+            templates=S_used,
             species_names=names,
             bands=bands,
             coeffs=coeffs,

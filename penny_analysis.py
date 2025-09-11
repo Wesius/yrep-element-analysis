@@ -222,7 +222,7 @@ def save_year_species_heatmap(
     if not all_years or not top_species:
         return
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(48, 20))
     
     for ax, kind in [(ax1, "circ"), (ax2, "uncirc")]:
         # Build matrix
@@ -254,6 +254,10 @@ def save_year_species_heatmap(
             norm=LogNorm(vmin=vmin, vmax=vmax),
             linewidths=0.5,
             linecolor='gray',
+            annot=True,
+            fmt=".4f",
+            annot_kws={"fontsize": 8, "rotation": 90},
+            mask=np.isnan(matrix),
         )
         ax.set_title(f"Year × Species FVE Heatmap ({kind.upper()})", fontweight="bold")
         ax.set_xlabel("Year")
@@ -349,12 +353,12 @@ def save_species_cooccurrence(
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
     
     for ax, results, kind in [(ax1, circ_results, "circ"), (ax2, uncirc_results, "uncirc")]:
-        # Get all detected species
+        # Get all detected species (preserve full species labels)
         all_species = set()
         for r in results:
             for d in r.detections:
                 if float(d.get("score", d.get("fve", 0.0))) >= threshold:
-                    sp = str(d.get("species", "?")).strip().split()[0].upper()
+                    sp = str(d.get("species", "?")).strip()
                     all_species.add(sp)
         
         species_list = sorted(list(all_species))
@@ -371,7 +375,7 @@ def save_species_cooccurrence(
             detected = set()
             for d in r.detections:
                 if float(d.get("score", d.get("fve", 0.0))) >= threshold:
-                    sp = str(d.get("species", "?")).strip().split()[0].upper()
+                    sp = str(d.get("species", "?")).strip()
                     if sp in all_species:
                         detected.add(sp)
             
@@ -516,7 +520,7 @@ def main() -> None:
         bg_n = len(list(s.bg_root.glob("*.txt"))) if s.bg_root.exists() else 0
         print(f"  - {s.label}: {meas_n} measurement files, {bg_n} background files")
 
-    refs = load_references(lists_dir)
+    refs = load_references(lists_dir, element_only=False)
     cfg = build_config()
 
     all_results: List[RunResult] = []
@@ -552,21 +556,27 @@ def main() -> None:
             print("   No groups found, skipping this measurement set")
             continue
         
-        # Analyze only non-junk groups to find best R²
+        # Analyze only non-junk groups to find best total TVE
         best_result = None
-        best_r2 = -1.0
+        best_tve = -1.0
+        best_r2_sel = -1.0
         best_group_idx = -1
         non_junk_groups = []
         
         for g_idx, group in enumerate(groups):
+            n_specs = len(group)
+            if n_specs <= 3:
+                print(f"   Group {g_idx + 1} (too small, {n_specs} spectra): skipped")
+                continue
+
             is_junk = is_junk_group(group, debug=False)
             status = "JUNK" if is_junk else "OK"
             
             if is_junk:
-                print(f"   Group {g_idx + 1} ({status}, {len(group)} spectra): skipped")
+                print(f"   Group {g_idx + 1} ({status}, {n_specs} spectra): skipped")
                 continue
                 
-            print(f"   Analyzing group {g_idx + 1} ({status}, {len(group)} spectra)...")
+            print(f"   Analyzing group {g_idx + 1} ({status}, {n_specs} spectra)...")
             non_junk_groups.append((g_idx, group))
             
             try:
@@ -581,10 +591,13 @@ def main() -> None:
                 )
                 
                 temp_r2 = float(temp_result.metrics.get("fit_R2", 0.0))
-                print(f"     R²={temp_r2:.4f}")
+                temp_det = getattr(temp_result, "detection", None)
+                temp_tve = float(sum((getattr(temp_det, "per_species_scores", {}) or {}).values())) if temp_det else 0.0
+                print(f"     R²={temp_r2:.4f}; total_TVE={temp_tve:.4f}")
                 
-                if temp_r2 > best_r2:
-                    best_r2 = temp_r2
+                if temp_tve > best_tve:
+                    best_tve = temp_tve
+                    best_r2_sel = temp_r2
                     best_result = temp_result
                     best_group_idx = g_idx
                     
@@ -596,7 +609,7 @@ def main() -> None:
             print("   No valid (non-junk) groups found or all analyses failed, skipping this measurement set")
             continue
         
-        print(f"   Selected group {best_group_idx + 1} with highest R²={best_r2:.4f}")
+        print(f"   Selected group {best_group_idx + 1} with highest total_TVE={best_tve:.4f} (R²={best_r2_sel:.4f})")
         
         # Use the best result
         result = best_result
@@ -638,22 +651,22 @@ def main() -> None:
             scores_map = getattr(det, "per_species_scores", {}) or {}
             year_scores = per_year_species_scores.setdefault(s.year, {})
             for sp, fve in scores_map.items():
-                sp_u = str(sp).strip().split()[0].upper()
-                year_scores.setdefault(sp_u, []).append(float(fve))
+                sp_key = str(sp).strip()
+                year_scores.setdefault(sp_key, []).append(float(fve))
 
             # Also aggregate by condition (circ/uncirc)
             name_l = s.meas_root.name.lower()
             kind = "circ" if name_l.startswith("circ") else ("uncirc" if name_l.startswith("uncirc") else "uncirc")
             kind_year_scores = per_kind_year_species_scores.setdefault(kind, {}).setdefault(s.year, {})
             for sp, fve in scores_map.items():
-                sp_u = str(sp).strip().split()[0].upper()
-                kind_year_scores.setdefault(sp_u, []).append(float(fve))
-                species_fve_sum_by_kind[kind][sp_u] = species_fve_sum_by_kind[kind].get(sp_u, 0.0) + float(fve)
+                sp_key = str(sp).strip()
+                kind_year_scores.setdefault(sp_key, []).append(float(fve))
+                species_fve_sum_by_kind[kind][sp_key] = species_fve_sum_by_kind[kind].get(sp_key, 0.0) + float(fve)
 
             # Count detected species (presence list) for top-5 selection per condition
             for d in result.detections:
-                sp_u = str(d.get("species", "?")).strip().split()[0].upper()
-                species_counts_by_kind[kind][sp_u] = species_counts_by_kind[kind].get(sp_u, 0) + 1
+                sp_key = str(d.get("species", "?")).strip()
+                species_counts_by_kind[kind][sp_key] = species_counts_by_kind[kind].get(sp_key, 0) + 1
             # Track R² per condition
             r2_by_kind[kind].append(r2)
 
@@ -676,7 +689,9 @@ def main() -> None:
 
     # Always include copper and zinc if present in data; keep max 5
     def pin_species(current: List[str], sums: Dict[str, float]) -> List[str]:
-        pinned = ["CU", "ZN"]
+        pinned = [
+            sp for sp in sums.keys() if sp.strip().upper() in {"CU", "ZN"}
+        ]
         have = set(current)
         for sp in pinned:
             if sp in sums and sp not in have:
@@ -684,7 +699,9 @@ def main() -> None:
         # If exceeding 5, keep pinned and highest others by sum
         if len(current) > 5:
             # Sort by (is_pinned, sum) so pinned rank first, then by sum
-            current_sorted = sorted(set(current), key=lambda s: ((s in pinned), sums.get(s, 0.0)), reverse=True)
+            current_sorted = sorted(
+                set(current), key=lambda s: ((s in pinned), sums.get(s, 0.0)), reverse=True
+            )
             out: List[str] = []
             for s in current_sorted:
                 if s not in out:
@@ -697,10 +714,11 @@ def main() -> None:
     top5_circ = pin_species(top5_circ, species_fve_sum_by_kind.get("circ", {}))
     top5_uncirc = pin_species(top5_uncirc, species_fve_sum_by_kind.get("uncirc", {}))
 
-    # Debug print to verify ZN totals
+    # Debug print to verify Zn totals (species-level)
     uncirc_sums = species_fve_sum_by_kind.get("uncirc", {})
-    if "ZN" in uncirc_sums:
-        print(f"[DEBUG] Uncirc ZN total FVE: {uncirc_sums['ZN']:.6f}")
+    for sp_name, total in uncirc_sums.items():
+        if sp_name.strip().upper() == "ZN":
+            print(f"[DEBUG] Uncirc Zn total FVE (species-level key='{sp_name}'): {total:.6f}")
 
     # Generate composition-over-time plots for circ and uncirc (top-5 only)
     save_composition_over_time(

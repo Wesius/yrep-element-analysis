@@ -808,15 +808,22 @@ class SpectrumVisualizer:
             )
             ax_coeff.set_title("TVE", fontweight="bold")
 
-        # Coefficient bar plot (sorted by coefficient; show ALL non-zero coefficients)
+        # Coefficient bar plot (show ALL non-zero effective coefficients)
         ax_coeff_sorted = fig.add_subplot(gs[2, :])
-        nz_coeff_indices = [i for i in range(len(species_names)) if coeffs_all[i] > 0.0]
+        # Use effective contribution amplitude = coefficient × ||template_i||
+        if templates is not None:
+            col_norms = np.linalg.norm(np.asarray(templates, dtype=float), axis=0)
+        else:
+            col_norms = np.ones_like(coeffs_all)
+        eff_coeffs_all = coeffs_all * col_norms
+
+        nz_coeff_indices = [i for i in range(len(species_names)) if eff_coeffs_all[i] > 0.0]
         if len(nz_coeff_indices) > 0:
-            nz_coeff_indices.sort(key=lambda i: float(coeffs_all[i]), reverse=True)
+            nz_coeff_indices.sort(key=lambda i: float(eff_coeffs_all[i]), reverse=True)
             # Show at most top 8 entries
             nz_coeff_indices = nz_coeff_indices[:8]
             coeff_names = [species_names[i] for i in nz_coeff_indices]
-            coeff_values = np.asarray([float(coeffs_all[i]) for i in nz_coeff_indices], dtype=float)
+            coeff_values = np.asarray([float(eff_coeffs_all[i]) for i in nz_coeff_indices], dtype=float)
 
             max_coeff = float(np.max(coeff_values)) if np.any(np.isfinite(coeff_values)) else 1.0
             max_coeff = max(max_coeff, 1e-12)

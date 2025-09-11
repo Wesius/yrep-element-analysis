@@ -91,11 +91,13 @@ def nnls_detect(
 
     # Optional FWHM optimization (rebuild templates) if reference is provided
     if getattr(cfg, "search_fwhm", True) and ref is not None:
-        center = float(getattr(cfg.instrument, "fwhm_nm", 2.0))
+        center = float(getattr(cfg, "fwhm_nm", 2.0))
         rel_spread = float(getattr(cfg, "fwhm_search_spread", 0.5))
         width = max(1e-3, rel_spread * center)
         iters = int(max(1, getattr(cfg, "fwhm_search_iterations", 1)))
-        species_filter = getattr(cfg, "species", None)
+        # Use the exact species list from the initial template build to ensure
+        # consistent column sets across FWHM candidates (avoids KeyErrors).
+        species_filter = list(species_names)
         best_S = S
         best_R2 = _quick_fit_R2(y, S)
         best_center = center
@@ -127,6 +129,13 @@ def nnls_detect(
         S_aug, y_aug = S, y
     sol = lsq_linear(S_aug, y_aug, bounds=(0.0, np.inf), method="trf")
     coeffs = np.asarray(sol.x, dtype=float)
+    # Zero-out numerically tiny coefficients that can cause huge-looking bars if
+    # templates have very small norms (just numerical residue). Threshold via L2
+    # contribution relative to total energy.
+    col_norms = np.linalg.norm(S, axis=0)
+    eff = coeffs * col_norms
+    thr = 1e-9 * float(np.linalg.norm(y))
+    coeffs[eff < thr] = 0.0
     y_fit = S @ coeffs
 
     # R2
@@ -192,4 +201,4 @@ def nnls_detect(
     per_species_scores = {
         species_names[i]: float(per_species_fve[i]) for i in range(len(species_names))
     }
-    return coeffs, y_fit, present, per_species_scores, float(R2)
+    return coeffs, y_fit, present, per_species_scores, float(R2), S
