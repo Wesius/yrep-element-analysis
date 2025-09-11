@@ -5,6 +5,7 @@ import numpy as np
 from scipy.optimize import lsq_linear
 
 from .types import AnalysisConfig
+from ._templates import build_templates
 
 
 def _shift_vector(x: np.ndarray, wl: np.ndarray, shift_nm: float) -> np.ndarray:
@@ -33,9 +34,9 @@ def _search_best_shift(
     # step equals grid step × step_factor
     step_nm = (wl_grid_nm[-1] - wl_grid_nm[0]) / max(1, wl_grid_nm.size - 1)
     step_nm = max(step_nm * step_factor, step_nm)
-    shifts = np.arange(
-        -config.instrument.max_shift_nm, config.instrument.max_shift_nm + 1e-12, step_nm
-    )
+    spread = float(getattr(config, "shift_search_spread", 1.0))
+    max_shift = max(0.0, float(config.instrument.max_shift_nm)) * max(0.0, spread)
+    shifts = np.arange(-max_shift, max_shift + 1e-12, step_nm)
     best_R2, best_shift, best_y = -np.inf, 0.0, y_cr
     # lightweight bounded LS to evaluate candidates
     for s in shifts:
@@ -54,6 +55,18 @@ def _search_best_shift(
             best_R2, best_shift, best_y = R2, s, y_s
     return float(best_shift), best_y
 
+
+def _quick_fit_R2(y: np.ndarray, S: np.ndarray, lam: float = 1e-3) -> float:
+    n = S.shape[1]
+    if n == 0:
+        return float("-inf")
+    S_aug = np.vstack([S, np.sqrt(lam) * np.eye(n)])
+    y_aug = np.concatenate([y, np.zeros(n)])
+    sol = lsq_linear(S_aug, y_aug, bounds=(0.0, np.inf), method="trf")
+    y_fit = S @ np.asarray(sol.x, dtype=float)
+    r = float(np.corrcoef(y, y_fit)[0, 1])
+    return r * r
+
 def nnls_detect(
     wl_grid_nm: np.ndarray,
     y_cr: np.ndarray,
@@ -62,6 +75,7 @@ def nnls_detect(
     *,
     bands: Optional[Dict[str, List[Tuple[float, float]]]] = None,
     config: Optional[AnalysisConfig] = None,
+    ref=None,
 ):
     cfg = config or AnalysisConfig()
     # Ridge via Tikhonov augmentation and bounded least squares
@@ -69,8 +83,43 @@ def nnls_detect(
     lam = max(0.0, lam)
     S = S_templates
     y = y_cr
-    # coarse wavelength alignment to references
-    _, y = _search_best_shift(wl_grid_nm, y_cr, S, species_names, cfg)
+    # Optional iterative coarse wavelength alignment to references
+    if getattr(cfg, "search_shift", True):
+        iters = int(max(1, getattr(cfg, "shift_search_iterations", 1)))
+        for i in range(iters):
+            step_factor = 1.0 / float(2 ** i)
+            _, y = _search_best_shift(wl_grid_nm, y, S, species_names, cfg, step_factor=step_factor)
+
+    # Optional FWHM optimization (rebuild templates) if reference is provided
+    if getattr(cfg, "search_fwhm", True) and ref is not None:
+        center = float(getattr(cfg.instrument, "fwhm_nm", 2.0))
+        rel_spread = float(getattr(cfg, "fwhm_search_spread", 0.5))
+        width = max(1e-3, rel_spread * center)
+        iters = int(max(1, getattr(cfg, "fwhm_search_iterations", 1)))
+        species_filter = getattr(cfg, "species", None)
+        best_S = S
+        best_R2 = _quick_fit_R2(y, S)
+        best_center = center
+        for _ in range(iters):
+            lo = max(1e-3, center - width)
+            hi = max(lo + 1e-3, center + width)
+            candidates = np.linspace(lo, hi, num=7)
+            for cand in candidates:
+                S_cand, names_cand = build_templates(ref, wl_grid_nm, fwhm_nm=float(cand), species_filter=species_filter)
+                if list(names_cand) != list(species_names):
+                    name_to_idx = {n: i for i, n in enumerate(names_cand)}
+                    idxs = [name_to_idx[n] for n in species_names]
+                    S_eval = S_cand[:, idxs]
+                else:
+                    S_eval = S_cand
+                R2 = _quick_fit_R2(y, S_eval)
+                if R2 > best_R2:
+                    best_R2 = R2
+                    best_S = S_eval
+                    best_center = float(cand)
+            center = best_center
+            width *= 0.5
+        S = best_S
     if lam and lam > 0:
         n = S.shape[1]
         S_aug = np.vstack([S, np.sqrt(lam) * np.eye(n)])
