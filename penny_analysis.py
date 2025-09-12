@@ -556,7 +556,7 @@ def main() -> None:
             print("   No groups found, skipping this measurement set")
             continue
         
-        # Analyze only non-junk groups to find best total TVE
+        # Analyze only non-junk groups to find best total FVE
         best_result = None
         best_tve = -1.0
         best_r2_sel = -1.0
@@ -593,7 +593,7 @@ def main() -> None:
                 temp_r2 = float(temp_result.metrics.get("fit_R2", 0.0))
                 temp_det = getattr(temp_result, "detection", None)
                 temp_tve = float(sum((getattr(temp_det, "per_species_scores", {}) or {}).values())) if temp_det else 0.0
-                print(f"     R²={temp_r2:.4f}; total_TVE={temp_tve:.4f}")
+                print(f"     R²={temp_r2:.4f}; total_FVE={temp_tve:.4f}")
                 
                 if temp_tve > best_tve:
                     best_tve = temp_tve
@@ -609,7 +609,7 @@ def main() -> None:
             print("   No valid (non-junk) groups found or all analyses failed, skipping this measurement set")
             continue
         
-        print(f"   Selected group {best_group_idx + 1} with highest total_TVE={best_tve:.4f} (R²={best_r2_sel:.4f})")
+        print(f"   Selected group {best_group_idx + 1} with highest total_FVE={best_tve:.4f} (R²={best_r2_sel:.4f})")
         
         # Use the best result
         result = best_result

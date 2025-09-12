@@ -76,27 +76,72 @@ class SpectrumVisualizer:
         title: str = "Raw Input Spectra",
     ):
         """Step 1: Plot raw input spectra."""
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), constrained_layout=True)
 
-        # Plot measurements
+        # Plot measurements: gray traces + blue average
         ax1.set_title("Measurement Spectra", fontweight="bold")
-        for i, spec in enumerate(measurements):
-            wl = np.asarray(spec.wavelength)
-            intensity = np.asarray(spec.intensity)
-            ax1.plot(wl, intensity, alpha=0.7, label=f"Measurement {i + 1}")
+        meas_wls: List[np.ndarray] = []
+        meas_vals: List[np.ndarray] = []
+        for spec in measurements:
+            wl = np.asarray(spec.wavelength, dtype=float)
+            intensity = np.asarray(spec.intensity, dtype=float)
+            mask = np.isfinite(wl) & np.isfinite(intensity)
+            wl = wl[mask]
+            intensity = intensity[mask]
+            if wl.size == 0:
+                continue
+            meas_wls.append(wl)
+            meas_vals.append(intensity)
+            ax1.plot(wl, intensity, color="0.75", alpha=0.5, linewidth=1.0)
+
+        # Overlay measurement average in blue
+        try:
+            if len(meas_wls) > 0:
+                grid_min = max(float(np.min(w)) for w in meas_wls)
+                grid_max = min(float(np.max(w)) for w in meas_wls)
+                if grid_max > grid_min:
+                    n_points = int(min(2048, max(256, min(len(w) for w in meas_wls))))
+                    wl_grid = np.linspace(grid_min, grid_max, num=n_points)
+                    interp_stack = [np.interp(wl_grid, wl, val) for wl, val in zip(meas_wls, meas_vals)]
+                    mean_intensity = np.mean(np.vstack(interp_stack), axis=0)
+                    ax1.plot(wl_grid, mean_intensity, "b-", linewidth=2.5)
+        except Exception:
+            # Be resilient if averaging fails; gray traces are still informative
+            pass
 
         ax1.set_xlabel("Wavelength (nm)")
         ax1.set_ylabel("Intensity")
-        ax1.legend()
         ax1.grid(True, alpha=0.3)
 
-        # Plot backgrounds if available
+        # Plot backgrounds: gray traces + blue average (if provided)
         if backgrounds:
             ax2.set_title("Background Spectra", fontweight="bold")
-            for i, spec in enumerate(backgrounds):
-                wl = np.asarray(spec.wavelength)
-                intensity = np.asarray(spec.intensity)
-                ax2.plot(wl, intensity, alpha=0.7, label=f"Background {i + 1}")
+            bg_wls: List[np.ndarray] = []
+            bg_vals: List[np.ndarray] = []
+            for spec in backgrounds:
+                wl = np.asarray(spec.wavelength, dtype=float)
+                intensity = np.asarray(spec.intensity, dtype=float)
+                mask = np.isfinite(wl) & np.isfinite(intensity)
+                wl = wl[mask]
+                intensity = intensity[mask]
+                if wl.size == 0:
+                    continue
+                bg_wls.append(wl)
+                bg_vals.append(intensity)
+                ax2.plot(wl, intensity, color="0.75", alpha=0.5, linewidth=1.0)
+
+            try:
+                if len(bg_wls) > 0:
+                    grid_min = max(float(np.min(w)) for w in bg_wls)
+                    grid_max = min(float(np.max(w)) for w in bg_wls)
+                    if grid_max > grid_min:
+                        n_points = int(min(2048, max(256, min(len(w) for w in bg_wls))))
+                        wl_grid = np.linspace(grid_min, grid_max, num=n_points)
+                        interp_stack = [np.interp(wl_grid, wl, val) for wl, val in zip(bg_wls, bg_vals)]
+                        mean_intensity = np.mean(np.vstack(interp_stack), axis=0)
+                        ax2.plot(wl_grid, mean_intensity, "b-", linewidth=2.5)
+            except Exception:
+                pass
         else:
             ax2.set_title("No Background Spectra Provided", fontweight="bold")
             ax2.text(
@@ -112,8 +157,6 @@ class SpectrumVisualizer:
 
         ax2.set_xlabel("Wavelength (nm)")
         ax2.set_ylabel("Intensity")
-        if backgrounds:
-            ax2.legend()
         ax2.grid(True, alpha=0.3)
 
         self._save_and_show(fig, self._get_next_filename("raw_spectra"), title)
@@ -700,8 +743,8 @@ class SpectrumVisualizer:
         title: str = "NNLS Fitting Results",
     ):
         """Step 10: Plot NNLS fitting results."""
-        fig = plt.figure(figsize=(18, 14))
-        gs = GridSpec(4, 3, figure=fig)
+        fig = plt.figure(figsize=(20, 16))
+        gs = GridSpec(4, 3, figure=fig, hspace=0.5, wspace=0.35)
 
         # Main fit plot
         ax_main = fig.add_subplot(gs[0, :])
@@ -728,15 +771,15 @@ class SpectrumVisualizer:
         ax_resid.set_ylabel("Residual")
         ax_resid.grid(True, alpha=0.3)
 
-        # TVE bar plot (sorted by TVE/FVE when available)
+        # FVE bar plot (sorted by FVE when available)
         ax_coeff = fig.add_subplot(gs[1, 1])
-        # Determine significant species by TVE if available; fallback to coefficients
+        # Determine significant species by FVE if available; fallback to coefficients
         tve_lookup: Dict[str, float] = per_species_scores or {}
         tve_all = np.asarray(
             [float(tve_lookup.get(name, 0.0)) for name in species_names], dtype=float
         )
         coeffs_all = np.asarray(coeffs, dtype=float)
-        # Show ALL non-zero TVE values; if no TVE data, fallback to non-zero coefficients
+        # Show ALL non-zero FVE values; if no FVE data, fallback to non-zero coefficients
         if np.any(tve_all > 0):
             sig_indices = [i for i in range(len(species_names)) if tve_all[i] > 0.0]
         else:
@@ -751,7 +794,7 @@ class SpectrumVisualizer:
             )
             for i in sig_indices
         ]
-        # Sort by TVE descending (stable fallback to coefficient if equal)
+        # Sort by FVE descending (stable fallback to coefficient if equal)
         sortable.sort(key=lambda t: (t[2], t[1]), reverse=True)
         # Show at most top 8 entries
         if len(sortable) > 8:
@@ -761,7 +804,7 @@ class SpectrumVisualizer:
         sig_tve = np.asarray([t[2] for t in sortable], dtype=float)
 
         if len(sig_coeffs) > 0:
-            # Use TVE as bar length; clamp to [0, 1] and color by TVE
+            # Use FVE as bar length; clamp to [0, 1] and color by FVE
             sig_tve_clamped = np.clip(sig_tve, 0.0, 1.0)
             norm = plt.Normalize(
                 vmin=float(np.min(sig_tve_clamped)),
@@ -772,17 +815,17 @@ class SpectrumVisualizer:
             bars = ax_coeff.barh(range(len(sig_coeffs)), sig_tve_clamped, color=colors)
             ax_coeff.set_yticks(range(len(sig_coeffs)))
             ax_coeff.set_yticklabels(sig_names)
-            ax_coeff.set_title("Significant Species (sorted by TVE)", fontweight="bold")
-            ax_coeff.set_xlabel("TVE (fraction)")
+            ax_coeff.set_title("Significant Species (sorted by FVE)", fontweight="bold")
+            ax_coeff.set_xlabel("FVE (fraction)")
             # Enforce consistent, linear scaling across runs
             ax_coeff.set_xscale("linear")
             ax_coeff.set_xlim(0.0, 1.0)
             ax_coeff.set_xticks(np.linspace(0.0, 1.0, 6))
-            # Put the highest TVE at the top of the chart
+            # Put the highest FVE at the top of the chart
             ax_coeff.invert_yaxis()
             ax_coeff.grid(True, alpha=0.3)
 
-            # Annotate TVE next to bars for clarity
+            # Annotate FVE next to bars for clarity
             for i, bar in enumerate(bars):
                 # Keep label within axes bounds
                 text_x = float(bar.get_width()) * 1.01
@@ -790,7 +833,7 @@ class SpectrumVisualizer:
                 ax_coeff.text(
                     text_x,
                     bar.get_y() + bar.get_height() / 2,
-                    f"TVE={sig_tve[i]:.3f}",
+                    f"FVE={sig_tve[i]:.3f}",
                     va="center",
                     ha="left",
                     fontsize=9,
@@ -799,14 +842,14 @@ class SpectrumVisualizer:
             ax_coeff.text(
                 0.5,
                 0.5,
-                "No non-zero TVE or coefficients",
+                "No non-zero FVE or coefficients",
                 ha="center",
                 va="center",
                 transform=ax_coeff.transAxes,
                 fontsize=12,
                 alpha=0.6,
             )
-            ax_coeff.set_title("TVE", fontweight="bold")
+            ax_coeff.set_title("FVE", fontweight="bold")
 
         # Coefficient bar plot (show ALL non-zero effective coefficients)
         ax_coeff_sorted = fig.add_subplot(gs[2, :])
@@ -912,7 +955,7 @@ class SpectrumVisualizer:
                         y_cumulative,
                         alpha=0.7,
                         color=colors[i],
-                        # Label with TVE if available, otherwise coefficient
+                        # Label with FVE if available, otherwise coefficient
                         label=(
                             f"{name} ({tve_lookup.get(name, 0.0):.3f})"
                             if per_species_scores is not None
@@ -1329,11 +1372,11 @@ class SpectrumVisualizer:
 
         # Define processing steps
         steps = [
+            "Spectrum\nGrouping",
             "Raw Spectra\n(Measurements + Backgrounds)",
             "Averaging & Grid\nInterpolation",
             "Background\nSubtraction",
             "Continuum\nRemoval",
-            "Spectrum\nGrouping",
             "Reference Line\nDatabase",
             "Template\nGeneration",
             "Band Region\nDefinition",
