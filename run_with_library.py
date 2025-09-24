@@ -61,7 +61,7 @@ def main() -> None:
     lists_dir = base / "data" / "lists"
     refs = load_references(lists_dir, element_only=False)
 
-    for std in ["Copper", "StandardA", "StandardB", "StandardC", "StandardD"]: #     for std in ["StandardA", "StandardB", "StandardC", "StandardD"]:
+    for std in ["Copper"]:
         print(f"\nProcessing {std}...")
         std_dir = base / "data" / "StandardsTest" / std
         meas_root = (
