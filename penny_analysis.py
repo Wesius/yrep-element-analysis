@@ -1,59 +1,63 @@
 #!/usr/bin/env python3
 """
-Batch analyzer for pennies datasets under data/pennies.
+Batch anayzer for pennies datasets under data/pennies.
 
 Behavior:
 - Discovers all measurement sets in data/pennies (both Circ_* and Uncirc_* across years)
-- Disables grouping (analyzes each found measurement set as a single run)
-- Uses the same config as run_with_library.py
-- Enables visualizations only for the first 3 runs (saved to plots/pennies/...)
-- After all runs finish, creates an aggregate summary visualization
+- Runs the composable pipeline on each non-junk spectral group
+- Captures lightweight stage histories periodically for quick inspection
+- Aggregates detections and fit quality into summary visualizations
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Sequence, Optional
+from typing import Dict, List, Sequence, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from matplotlib.colors import LogNorm
 
-from yrep_spectrum_analysis import AnalysisConfig, analyze
-from yrep_spectrum_analysis.types import Spectrum
-from yrep_spectrum_analysis.utils import load_references, load_txt_spectrum, group_spectra, is_junk_group
+from yrep_spectrum_analysis import (
+    average_signals,
+    build_templates,
+    fwhm_search,
+    continuum_remove_arpls,
+    continuum_remove_rolling,
+    detect_nnls,
+    resample,
+    shift_search,
+    subtract_background,
+    trim,
+    Detection,
+    DetectionResult,
+    Signal,
+)
+from yrep_spectrum_analysis.utils import (
+    expand_species_filter,
+    group_signals,
+    is_junk_group,
+    load_references,
+    load_signals_from_dir,
+)
 
 
 # -------------------------
-# Configuration (mirrors run_with_library.py)
+# Pipeline configuration
 # -------------------------
-def build_config() -> AnalysisConfig:
-    return AnalysisConfig(
-        fwhm_nm=0.75,
-        grid_step_nm=None,
-        species=["Cu", "Zn", "C", "Fe", "Ni", "Pb", "Sn", "Si", "Al", "Mg", "Ca", "Na", "K", "Cr", "Mn"],
-        baseline_strength=0,
-        regularization=0.0,
-        min_bands_required=5,
-        presence_threshold=0,
-        top_k=0,
-        min_wavelength_nm=300,
-        max_wavelength_nm=600,
-        auto_trim_left=False,
-        auto_trim_right=False,
-        align_background=False,
-        background_fn=None,
-        continuum_fn=None,
-        continuum_strategy = "arpls",
-        search_shift=True,
-        shift_search_iterations=2,
-        shift_search_spread=0.5,  # absolute nm window
-        search_fwhm=True,
-        fwhm_search_iterations=2,
-        fwhm_search_spread=0.5,
-    )
+AVERAGE_POINTS = 1200
+RESAMPLE_POINTS = 1500
+TRIM_RANGE = (300.0, 600.0)
+CONTINUUM_STRENGTH = 0.0
+TEMPLATE_FWHM = 0.75
+SHIFT_PARAMS = {"spread_nm": 0.5, "iterations": 2}
+DETECT_PARAMS = {"presence_threshold": 0.0, "min_bands": 5}
+SPECIES_FILTER = [
+    "CU", "ZN", "C", "FE", "NI", "PB", "SN", "SI", "AL", "MG",
+    "CA", "NA", "K", "CR", "MN",
+]
 
 
 # -------------------------
@@ -111,7 +115,7 @@ def discover_pennies_sets(pennies_root: Path) -> List[MeasurementSet]:
 class RunResult:
     label: str
     r2: float
-    detections: List[Dict[str, float]]
+    detections: List[Detection]
 
 
 def save_aggregate_summary(results: Sequence[RunResult], out_dir: Path) -> None:
@@ -126,8 +130,8 @@ def save_aggregate_summary(results: Sequence[RunResult], out_dir: Path) -> None:
     detection_scores: List[float] = []
     for r in results:
         for d in r.detections:
-            species = str(d.get("species", "?")).strip()
-            score = float(d.get("score", d.get("fve", 0.0)))
+            species = str(d.species).strip()
+            score = float(d.meta.get("fve", d.score))
             species_counts[species] = species_counts.get(species, 0) + 1
             detection_scores.append(score)
 
@@ -191,7 +195,7 @@ def save_aggregate_summary(results: Sequence[RunResult], out_dir: Path) -> None:
     ax.axis("off")
 
     fig.suptitle("Pennies Analysis – Aggregate Summary", fontsize=16, fontweight="bold")
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.tight_layout(rect=(0, 0.03, 1, 0.95))
     fig.savefig(out_dir / "00_pennies_summary.png", dpi=300)
     plt.close(fig)
 
@@ -322,7 +326,8 @@ def save_stacked_area_composition(
         
         # Plot stacked area with varied colors
         # Use tab20 colormap for more color variety
-        colors = plt.cm.tab20(np.linspace(0, 1, len(top_species)))
+        cmap = plt.get_cmap("tab20")
+        colors = cmap(np.linspace(0, 1, len(top_species)))
         
         ax.stackplot(x_years, matrix_pct, labels=top_species, colors=colors, alpha=0.9)
         ax.set_title(f"Composition Over Time ({kind.upper()})", fontweight="bold")
@@ -357,8 +362,8 @@ def save_species_cooccurrence(
         all_species = set()
         for r in results:
             for d in r.detections:
-                if float(d.get("score", d.get("fve", 0.0))) >= threshold:
-                    sp = str(d.get("species", "?")).strip()
+                if float(d.meta.get("fve", d.score)) >= threshold:
+                    sp = str(d.species).strip()
                     all_species.add(sp)
         
         species_list = sorted(list(all_species))
@@ -374,8 +379,8 @@ def save_species_cooccurrence(
         for r in results:
             detected = set()
             for d in r.detections:
-                if float(d.get("score", d.get("fve", 0.0))) >= threshold:
-                    sp = str(d.get("species", "?")).strip()
+                if float(d.meta.get("fve", d.score)) >= threshold:
+                    sp = str(d.species).strip()
                     if sp in all_species:
                         detected.add(sp)
             
@@ -474,7 +479,7 @@ def save_composition_over_time(
     # Keep legend outside to avoid occlusion
     ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), ncol=1, fontsize=8)
 
-    fig.tight_layout(rect=[0, 0, 0.8, 1])
+    fig.tight_layout(rect=(0, 0, 0.8, 1))
     fname = "01_composition_over_time"
     if filename_suffix:
         fname += f"_{filename_suffix}"
@@ -485,22 +490,15 @@ def save_composition_over_time(
 # -------------------------
 # Main
 # -------------------------
-def _load_spectra_dir_filtered(root: Path) -> List[Spectrum]:
-    specs: List[Spectrum] = []
-    if not root.exists():
-        return specs
-    for fp in sorted(root.glob("*.txt")):
-        # Skip non-spectral helper outputs commonly named *_average.txt, etc.
-        name_l = fp.name.lower()
-        if any(tag in name_l for tag in ["average", "avg_"]):
+def _load_signals_dir_filtered(root: Path) -> List[Signal]:
+    signals = load_signals_from_dir(root)
+    filtered: List[Signal] = []
+    for sig in signals:
+        name_l = str(sig.meta.get("file", "")).lower()
+        if any(tag in name_l for tag in ("average", "avg_")):
             continue
-        try:
-            wl, iy = load_txt_spectrum(fp)
-        except Exception:
-            # Not a spectral file in expected format; skip gracefully
-            continue
-        specs.append(Spectrum(wavelength=wl, intensity=iy))
-    return specs
+        filtered.append(sig)
+    return filtered
 
 
 def main() -> None:
@@ -521,7 +519,6 @@ def main() -> None:
         print(f"  - {s.label}: {meas_n} measurement files, {bg_n} background files")
 
     refs = load_references(lists_dir, element_only=False)
-    cfg = build_config()
 
     all_results: List[RunResult] = []
     per_year_species_scores: Dict[str, Dict[str, List[float]]] = {}
@@ -544,12 +541,12 @@ def main() -> None:
 
     for idx, s in enumerate(sets, start=1):
         print(f"\nRunning analysis {idx}/{len(sets)}: {s.label}")
-        meas = _load_spectra_dir_filtered(s.meas_root)
-        bg = _load_spectra_dir_filtered(s.bg_root)
+        meas = _load_signals_dir_filtered(s.meas_root)
+        bg = _load_signals_dir_filtered(s.bg_root)
         print(f"   Loaded {len(meas)} measurement(s), {len(bg)} background(s)")
         
         # Group spectra
-        groups = group_spectra(meas)
+        groups = group_signals(meas)
         print(f"   Found {len(groups)} spectral group(s)")
         
         if not groups:
@@ -580,29 +577,24 @@ def main() -> None:
             non_junk_groups.append((g_idx, group))
             
             try:
-                # Run analysis without visualization to get R²
-                temp_result = analyze(
-                    measurements=group,
+                temp_result, _ = run_pipeline_for_group(
+                    group,
+                    background_signals=bg,
                     references=refs,
-                    backgrounds=bg if bg else None,
-                    config=cfg,
-                    visualize=False,
-                    viz_show=False,
+                    capture_history=False,
                 )
-                
-                temp_r2 = float(temp_result.metrics.get("fit_R2", 0.0))
-                temp_det = getattr(temp_result, "detection", None)
-                temp_tve = float(sum((getattr(temp_det, "per_species_scores", {}) or {}).values())) if temp_det else 0.0
+                temp_r2 = float(temp_result.meta.get("fit_R2", 0.0))
+                per_species = temp_result.meta.get("per_species_fve", {}) or {}
+                temp_tve = float(sum(per_species.values()))
                 print(f"     R²={temp_r2:.4f}; total_FVE={temp_tve:.4f}")
-                
+
                 if temp_tve > best_tve:
                     best_tve = temp_tve
                     best_r2_sel = temp_r2
                     best_result = temp_result
                     best_group_idx = g_idx
-                    
-            except Exception as e:
-                print(f"     Failed to analyze: {e}")
+            except Exception as exc:
+                print(f"     Failed to analyze: {exc}")
                 continue
         
         if best_result is None:
@@ -611,63 +603,56 @@ def main() -> None:
         
         print(f"   Selected group {best_group_idx + 1} with highest total_FVE={best_tve:.4f} (R²={best_r2_sel:.4f})")
         
-        # Use the best result
         result = best_result
-        
-        # Re-run visualization for selected group if needed
+
         visualize_this = (idx % 10 == 0)
         if visualize_this:
             viz_dir = base / "plots" / "pennies" / s.year / s.meas_root.name
             viz_dir.mkdir(parents=True, exist_ok=True)
-            print("   Re-running best group with visualization...")
-            
-            result = analyze(
-                measurements=groups[best_group_idx],
+            print("   Capturing stage history for visualization...")
+            result, history = run_pipeline_for_group(
+                groups[best_group_idx],
+                background_signals=bg,
                 references=refs,
-                backgrounds=bg if bg else None,
-                config=cfg,
-                visualize=True,
-                viz_output_dir=str(viz_dir),
-                viz_show=False,
+                capture_history=True,
             )
+            save_stage_history(history, viz_dir)
 
-        r2 = float(result.metrics.get("fit_R2", 0.0))
+        r2 = float(result.meta.get("fit_R2", 0.0))
         print(f"   R²={r2:.4f}; detections={len(result.detections)}")
         if result.detections:
             print("      Detections:")
             for d in result.detections:
-                score = float(d.get("score", d.get("fve", 0.0)))
-                coeff = float(d.get("coeff", 0.0))
-                bands = int(d.get("bands_hit", 0))
-                print(f"        - {d['species']}: score={score:.4f}, coeff={coeff:.4f}, bands={bands}")
+                score = float(d.meta.get("fve", d.score))
+                coeff = d.meta.get("coeff")
+                bands = d.meta.get("bands_hit")
+                coeff_txt = f", coeff={coeff:.4f}" if coeff is not None else ""
+                bands_txt = f", bands={int(bands)}" if bands is not None else ""
+                print(f"        - {d.species}: score={score:.4f}{coeff_txt}{bands_txt}")
         else:
             print("      No detections above threshold")
 
         all_results.append(RunResult(label=s.label, r2=r2, detections=list(result.detections)))
 
         # Aggregate per-species FVE for composition-over-time
-        det = getattr(result, "detection", None)
-        if det is not None:
-            scores_map = getattr(det, "per_species_scores", {}) or {}
+        per_species_scores = result.meta.get("per_species_fve", {}) or {}
+        if per_species_scores:
             year_scores = per_year_species_scores.setdefault(s.year, {})
-            for sp, fve in scores_map.items():
+            for sp, fve in per_species_scores.items():
                 sp_key = str(sp).strip()
                 year_scores.setdefault(sp_key, []).append(float(fve))
 
-            # Also aggregate by condition (circ/uncirc)
             name_l = s.meas_root.name.lower()
             kind = "circ" if name_l.startswith("circ") else ("uncirc" if name_l.startswith("uncirc") else "uncirc")
             kind_year_scores = per_kind_year_species_scores.setdefault(kind, {}).setdefault(s.year, {})
-            for sp, fve in scores_map.items():
+            for sp, fve in per_species_scores.items():
                 sp_key = str(sp).strip()
                 kind_year_scores.setdefault(sp_key, []).append(float(fve))
                 species_fve_sum_by_kind[kind][sp_key] = species_fve_sum_by_kind[kind].get(sp_key, 0.0) + float(fve)
 
-            # Count detected species (presence list) for top-5 selection per condition
             for d in result.detections:
-                sp_key = str(d.get("species", "?")).strip()
+                sp_key = str(d.species).strip()
                 species_counts_by_kind[kind][sp_key] = species_counts_by_kind[kind].get(sp_key, 0) + 1
-            # Track R² per condition
             r2_by_kind[kind].append(r2)
 
     # Aggregate summary visuals (after all runs)
@@ -789,7 +774,103 @@ def main() -> None:
     print_metrics_for("uncirc")
 
 
+def save_stage_history(history: Sequence[Tuple[str, Signal]], out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for idx, (label, sig) in enumerate(history, start=1):
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(sig.wavelength, sig.intensity, linewidth=1.2)
+        ax.set_title(f"{label} ({idx:02d})")
+        ax.set_xlabel("Wavelength (nm)")
+        ax.set_ylabel("Intensity")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(out_dir / f"stage_{idx:02d}_{label}.png", dpi=200)
+        plt.close(fig)
+
+
+def _species_filter(references) -> List[str] | None:
+    return expand_species_filter(references.lines.keys(), SPECIES_FILTER)
+
+
+def run_pipeline_for_group(
+    group: Sequence[Signal],
+    *,
+    background_signals: Sequence[Signal] | None,
+    references,
+    capture_history: bool = False,
+) -> tuple[DetectionResult, List[Tuple[str, Signal]]]:
+    signal = average_signals(group, n_points=AVERAGE_POINTS)
+    background_signal = (
+        average_signals(background_signals, n_points=AVERAGE_POINTS)
+        if background_signals
+        else None
+    )
+    species_filter = _species_filter(references)
+
+    history: List[Tuple[str, Signal]] = []
+    processed = signal
+    if capture_history:
+        history.append(("input", processed))
+
+    processed = trim(processed, min_nm=TRIM_RANGE[0], max_nm=TRIM_RANGE[1])
+    if capture_history:
+        history.append(("trim", processed))
+
+    processed = resample(processed, n_points=RESAMPLE_POINTS)
+    if capture_history:
+        history.append(("resample", processed))
+
+    if background_signal is not None:
+        processed = subtract_background(processed, background_signal, align=False)
+        if capture_history:
+            history.append(("background", processed))
+
+    processed = continuum_remove_arpls(processed, strength=CONTINUUM_STRENGTH)
+    if capture_history:
+        history.append(("continuum_arpls", processed))
+
+    processed = continuum_remove_rolling(processed, strength=CONTINUUM_STRENGTH)
+    if capture_history:
+        history.append(("continuum_rolling", processed))
+
+    templates = build_templates(
+        processed,
+        references=references,
+        fwhm_nm=TEMPLATE_FWHM,
+        species_filter=species_filter,
+    )
+    if FWHM_SEARCH["iterations"] > 0 and FWHM_SEARCH["spread_nm"] > 0:
+        templates = fwhm_search(
+            processed,
+            references,
+            initial_fwhm_nm=TEMPLATE_FWHM,
+            spread_nm=FWHM_SEARCH["spread_nm"],
+            iterations=FWHM_SEARCH["iterations"],
+            species_filter=species_filter,
+        )
+
+    if SHIFT_PARAMS["spread_nm"] > 0 and SHIFT_PARAMS["iterations"] > 0:
+        processed = shift_search(
+            processed,
+            templates,
+            spread_nm=SHIFT_PARAMS["spread_nm"],
+            iterations=SHIFT_PARAMS["iterations"],
+        )
+        if capture_history:
+            history.append(("shift", processed))
+
+    result = detect_nnls(
+        processed,
+        templates,
+        presence_threshold=DETECT_PARAMS["presence_threshold"],
+        min_bands=DETECT_PARAMS["min_bands"],
+    )
+
+    if capture_history:
+        history.append(("detection", result.signal))
+
+    return result, history
+
+
 if __name__ == "__main__":
     main()
-
-

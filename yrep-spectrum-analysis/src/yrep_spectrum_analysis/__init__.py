@@ -1,16 +1,35 @@
-"""Public API for yrep_spectrum_analysis (minimal surface).
+"""Composable spectral analysis pipeline."""
 
-Exports:
-- AnalysisConfig: configuration object controlling analysis parameters (incl. fwhm/grid)
-- Spectrum: typed container for wavelength/intensity arrays
-- analyze: full pipeline (preprocess → templates/bands → detect)
-"""
-
-from .types import AnalysisConfig, Spectrum
-from .api import analyze
+from .pipeline import (
+    average_signals,
+    build_templates,
+    continuum_remove_arpls,
+    continuum_remove_rolling,
+    fwhm_search,
+    detect_nnls,
+    mask,
+    resample,
+    shift_search,
+    subtract_background,
+    trim,
+)
+from .types import Detection, DetectionResult, References, Signal, Templates
 
 __all__ = [
-    "AnalysisConfig",
-    "Spectrum",
-    "analyze",
+    "average_signals",
+    "build_templates",
+    "continuum_remove_arpls",
+    "continuum_remove_rolling",
+    "fwhm_search",
+    "detect_nnls",
+    "mask",
+    "resample",
+    "shift_search",
+    "subtract_background",
+    "trim",
+    "Detection",
+    "DetectionResult",
+    "References",
+    "Signal",
+    "Templates",
 ]

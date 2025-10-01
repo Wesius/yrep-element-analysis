@@ -1,125 +1,58 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Protocol, Tuple, Union, Any
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Tuple
 import numpy as np
 
 
-class SpectrumLike(Protocol):
-    @property
-    def wavelength(self) -> np.ndarray: ...
+@dataclass
+class Signal:
+    """Single spectrum snapshot carried between preprocessing stages."""
+    wavelength: np.ndarray  # shape: (n_samples,)
+    intensity: np.ndarray   # shape: (n_samples,)
+    meta: Dict[str, Any] = field(default_factory=dict)
 
-    @property
-    def intensity(self) -> np.ndarray: ...
-
-
-@dataclass(frozen=True)
-class Spectrum:
-    wavelength: np.ndarray
-    intensity: np.ndarray
-    metadata: Optional[Dict[str, str]] = None
-
-    def __post_init__(self):
-        if self.wavelength.shape != self.intensity.shape:
-            raise ValueError("wavelength and intensity must have same shape")
-        if self.wavelength.size == 0:
-            raise ValueError("spectrum cannot be empty")
+    def copy(self, *, deep: bool = True) -> "Signal":
+        wl = np.copy(self.wavelength) if deep else self.wavelength
+        iy = np.copy(self.intensity) if deep else self.intensity
+        meta = {k: v for k, v in self.meta.items()} if deep else self.meta
+        return Signal(wavelength=wl, intensity=iy, meta=meta)
 
 
 @dataclass
-class RefLines:
+class References:
+    """Line lists grouped by species.
+
+    Each entry maps to a tuple of (wavelength_nm, intensity) arrays, both 1-D.
+    """
+    lines: Dict[str, Tuple[np.ndarray, np.ndarray]]
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+    def species(self) -> List[str]:
+        return list(self.lines.keys())
+
+
+@dataclass
+class Templates:
+    """Gaussian-broadened templates aligned to a signal's grid."""
+    matrix: np.ndarray                 # shape: (n_samples, n_species)
     species: List[str]
-    wavelength_nm: np.ndarray
-    intensity: np.ndarray
+    bands: Dict[str, List[Tuple[float, float]]]
+    meta: Dict[str, Any] = field(default_factory=dict)
 
-
-# Optional user overrides (advanced), each receives arrays and returns arrays
-# The last argument provides access to configuration
-BackgroundFn = Callable[
-    [np.ndarray, np.ndarray, np.ndarray, np.ndarray, Any],
-    Tuple[np.ndarray, Dict[str, float]],
-]
-ContinuumFn = Callable[[np.ndarray, np.ndarray, float], Tuple[np.ndarray, np.ndarray]]
+    def as_tuple(self) -> Tuple[np.ndarray, List[str], Dict[str, List[Tuple[float, float]]]]:
+        return self.matrix, self.species, self.bands
 
 
 @dataclass
-class AnalysisConfig:
-    # Instrument parameters
-    fwhm_nm: float = 2.0
-    grid_step_nm: Optional[float] = None
-    # Optional averaging grid control when combining multiple spectra
-    average_n_points: Optional[int] = None
-    # Core
-    species: Optional[List[str]] = None  # optional species filter
-
-    # Tweaks (coarse knobs)
-    baseline_strength: float = 0.5  # 0..1
-    # Continuum removal strategy: "arpls" (ARPLS subtraction), "rolling" (upper-envelope/percentile), or "both" (ARPLS then rolling)
-    continuum_strategy: str = "both"
-    regularization: float = 0.0  # ridge λ; 0.0 (none), ~1e-2 (light), ~1e-1 (strong)
-    min_bands_required: int = 2
-    presence_threshold: Optional[float] = None  # defaults to 0.02 if None
-    top_k: int = 5
-
-    # Preprocessing trims (flattened settings)
-    min_wavelength_nm: Optional[float] = None
-    max_wavelength_nm: Optional[float] = None
-    auto_trim_left: bool = False
-    auto_trim_right: bool = False
-
-    # Background handling
-    align_background: bool = (False) # if True, register (shift) background before subtraction
-
-    # Optional advanced overrides
-    background_fn: Optional[BackgroundFn] = None
-    continuum_fn: Optional[ContinuumFn] = None
-
-    # Search controls
-    # Coarse wavelength shift alignment against templates
-    search_shift: bool = True
-    shift_search_iterations: int = 1
-    # Optional FWHM optimization (templates rebuilt per candidate)
-    search_fwhm: bool = True
-    fwhm_search_iterations: int = 1
-    # Search spreads
-    # For shift (nm): absolute search window in nm, range = [-spread, +spread]
-    shift_search_spread: float = 0.0
-    # For FWHM (relative): bracket width = fwhm_nm * fwhm_search_spread
-    fwhm_search_spread: float = 0.5
-
-    # Post-preprocessing wavelength mask: list of (start_nm, end_nm) intervals to zero
-    mask: Optional[List[Tuple[float, float]]] = None
-
-
-@dataclass
-class PreprocessResult:
-    wl_grid: np.ndarray
-    y_meas: np.ndarray
-    y_sub: np.ndarray
-    y_cr: np.ndarray
-    baseline: np.ndarray
-    # Optional intermediates for visualization
-    y_div: Optional[np.ndarray] = None
-    baseline_div: Optional[np.ndarray] = None
-    y_bg_interp: Optional[np.ndarray] = None
-    avg_meas: Optional[Tuple[np.ndarray, np.ndarray]] = None
-    avg_bg: Optional[Tuple[np.ndarray, np.ndarray]] = None
+class Detection:
+    species: str
+    score: float
+    meta: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class DetectionResult:
-    wl_grid: np.ndarray
-    y_cr: np.ndarray
-    y_fit: np.ndarray
-    coeffs: np.ndarray
-    species_order: List[str]
-    present: List[Dict[str, Union[str, float, int]]]
-    per_species_scores: Dict[str, float]
-    fit_R2: float
-
-
-@dataclass
-class AnalysisResult:
-    detections: List[Dict[str, Union[str, float, int]]]
-    detection: DetectionResult
-    metrics: Dict[str, Union[float, Dict[str, float]]]
+    signal: Signal
+    detections: List[Detection]
+    meta: Dict[str, Any] = field(default_factory=dict)

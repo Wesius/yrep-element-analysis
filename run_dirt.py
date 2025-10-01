@@ -1,76 +1,47 @@
 #!/usr/bin/env python3
-"""
-Minimal demo using yrep_spectrum_analysis library.
-
-Reads existing dataset files into arrays, runs analyze(), prints concise results.
-This is a demonstration of simplicity: no file writes, no plotting.
-"""
+"""Run the composable analysis pipeline across the dirt datasets."""
 
 from __future__ import annotations
 
 from pathlib import Path
 import numpy as np
 
-
-from yrep_spectrum_analysis import AnalysisConfig, analyze
-from yrep_spectrum_analysis.types import Spectrum
+from yrep_spectrum_analysis import (
+    average_signals,
+    build_templates,
+    continuum_remove_arpls,
+    continuum_remove_rolling,
+    detect_nnls,
+    fwhm_search,
+    resample,
+    shift_search,
+    subtract_background,
+    trim,
+)
+from yrep_spectrum_analysis.types import Signal
 from yrep_spectrum_analysis.utils import (
-    load_txt_spectrum,
-    load_references,
-    group_spectra,
+    expand_species_filter,
+    group_signals,
     is_junk_group,
-    spectrum_quality,
-    average_spectra
+    load_references,
+    load_signals_from_dir,
+    signal_quality,
 )
 
 
-def load_spectra_from_dir(root: Path) -> list[Spectrum]:
-    """Recursively load spectra from ``root``, ignoring helper README files."""
-    if not root.exists():
-        return []
-
-    spectra: list[Spectrum] = []
-    for path in sorted(root.rglob("*.txt")):
-        if not path.is_file():
+def load_spectra_from_dir(root: Path) -> list[Signal]:
+    signals = load_signals_from_dir(root)
+    filtered: list[Signal] = []
+    for sig in signals:
+        name_l = str(sig.meta.get("file", "")).lower()
+        if any(tag in name_l for tag in ("average", "avg_")):
             continue
-        name_lower = path.name.lower()
-        if name_lower.startswith("readme"):
-            continue
-        try:
-            wl, iy = load_txt_spectrum(path)
-        except ValueError:
-            try:
-                data = np.loadtxt(path, delimiter="\t")
-            except Exception:
-                try:
-                    data = np.loadtxt(path)
-                except Exception:
-                    print(f"   Skipping {path.relative_to(root)}: no spectral data detected")
-                    continue
-            if data.ndim == 1:
-                if data.size % 2 != 0:
-                    print(f"   Skipping {path.relative_to(root)}: unsupported data shape")
-                    continue
-                data = data.reshape(-1, 2)
-            if data.shape[1] < 2:
-                print(f"   Skipping {path.relative_to(root)}: not enough columns")
-                continue
-            wl = data[:, 0]
-            iy = data[:, 1]
-        spectra.append(
-            Spectrum(
-                wavelength=np.asarray(wl, dtype=float),
-                intensity=np.asarray(iy, dtype=float),
-                metadata={"file": str(path.relative_to(root))},
-            )
-        )
-    return spectra
+        filtered.append(sig)
+    return filtered
 
 
-def prepare_datasets(base: Path) -> list[tuple[str, list[Spectrum], list[Spectrum]]]:
-    """Discover and load available dirt datasets beneath the analysis root."""
-    datasets: list[tuple[str, list[Spectrum], list[Spectrum]]] = []
-
+def prepare_datasets(base: Path) -> list[tuple[str, list[Signal], list[Signal]]]:
+    datasets: list[tuple[str, list[Signal], list[Signal]]] = []
     dirt_root = base / "data" / "dirt"
     legacy_dir = dirt_root / "dirt"
     if legacy_dir.exists():
@@ -103,100 +74,129 @@ def prepare_datasets(base: Path) -> list[tuple[str, list[Spectrum], list[Spectru
     return datasets
 
 
-# Analysis configuration (explicitly sets all used fields)
-CFG = AnalysisConfig(
-    fwhm_nm=0.75,
-    grid_step_nm=None,  # use data-driven grid if None
-    species=[
-        "Na", "K", "Ca", "Li", "Cu", "Ba", "Sr", "Hg", "O", "N", "Al", "Mg", "Si", "Zn", "Pb", "Cd", "Ag", "Au", "Cr", "Mn", "Co", "Ni", "Ti", "Sn", "Sb", "As", "Se", "C", "B", "Fe", "H", "Ar"
-    ],
-    # Tweaks
-    baseline_strength=0.5,
-    # Ridge regularization strength (λ). 0 disables; ~1e-2 light, ~1e-1 strong.
-    regularization=0.0,
-    min_bands_required=5,
-    presence_threshold=0,  # default threshold (FVE fraction)
-    top_k=3,
-    # Trimming controls (flattened)
-    min_wavelength_nm=300,
-    max_wavelength_nm=1000,
-    auto_trim_left=False,
-    auto_trim_right=False,
-    # Background handling and optional overrides
-    align_background=False,
-    background_fn=None,
-    continuum_fn=None,
-    mask = [(545, 570), (585, 640)],
-    # Search controls
-    search_shift=False,
-    shift_search_iterations=3,
-    shift_search_spread=0.5,  # absolute nm window
-    search_fwhm=False,
-    fwhm_search_iterations=3,
-    fwhm_search_spread=0.5,
-)
+def describe_group(group: list[Signal]) -> tuple[bool, float, float]:
+    junk = is_junk_group(group)
+    q_specs = [signal_quality(sig) for sig in group]
+    try:
+        avg = average_signals(group, n_points=1200)
+        q_avg = signal_quality(avg)
+    except Exception:
+        q_avg = 0.0
+    return junk, float(np.mean(q_specs)), q_avg
+
+
+AVERAGE_POINTS = 1200
+RESAMPLE_POINTS = 1500
+TRIM_RANGE = (300.0, 600.0)
+CONTINUUM_STRENGTH = 0.5
+SHIFT_PARAMS = {"spread_nm": 0.5, "iterations": 3}
+DETECT_PARAMS = {"presence_threshold": 0.02, "min_bands": 5}
+INITIAL_FWHM = 0.75
+FWHM_SEARCH = {"enabled": True, "spread_nm": 0.2, "iterations": 3}
+
+
+def run_pipeline(
+    measurements: list[Signal],
+    backgrounds: list[Signal],
+    references,
+    species_filter: list[str] | None,
+):
+    signal = average_signals(measurements, n_points=AVERAGE_POINTS)
+    background_signal = (
+        average_signals(backgrounds, n_points=AVERAGE_POINTS)
+        if backgrounds
+        else None
+    )
+    processed = trim(signal, min_nm=TRIM_RANGE[0], max_nm=TRIM_RANGE[1])
+    processed = resample(processed, n_points=RESAMPLE_POINTS)
+    if background_signal is not None:
+        processed = subtract_background(processed, background_signal, align=False)
+    processed = continuum_remove_arpls(processed, strength=CONTINUUM_STRENGTH)
+    processed = continuum_remove_rolling(processed, strength=CONTINUUM_STRENGTH)
+    templates = build_templates(
+        processed,
+        references=references,
+        fwhm_nm=INITIAL_FWHM,
+        species_filter=species_filter,
+    )
+    if FWHM_SEARCH["enabled"] and FWHM_SEARCH["iterations"] > 0 and FWHM_SEARCH["spread_nm"] > 0:
+        templates = fwhm_search(
+            processed,
+            references,
+            initial_fwhm_nm=INITIAL_FWHM,
+            spread_nm=FWHM_SEARCH["spread_nm"],
+            iterations=FWHM_SEARCH["iterations"],
+            species_filter=species_filter,
+        )
+    if SHIFT_PARAMS["spread_nm"] > 0 and SHIFT_PARAMS["iterations"] > 0:
+        processed = shift_search(
+            processed,
+            templates,
+            spread_nm=SHIFT_PARAMS["spread_nm"],
+            iterations=SHIFT_PARAMS["iterations"],
+        )
+    result = detect_nnls(
+        processed,
+        templates,
+        presence_threshold=DETECT_PARAMS["presence_threshold"],
+        min_bands=DETECT_PARAMS["min_bands"],
+    )
+    return result, templates
 
 
 def main() -> None:
     base = Path(__file__).resolve().parent
     lists_dir = base / "data" / "lists"
-    refs = load_references(lists_dir, element_only=False)
+    references = load_references(lists_dir, element_only=False)
+
+    species_filter = expand_species_filter(references.lines.keys(), [
+        "Na", "K", "Ca", "Li", "Cu", "Ba", "Sr", "Hg", "O", "N", "Al",
+        "Mg", "Si", "Zn", "Pb", "Cd", "Ag", "Au", "Cr", "Mn", "Co", "Ni",
+        "Ti", "Sn", "Sb", "As", "Se", "C", "B", "Fe", "H", "Ar",
+    ])
 
     datasets = prepare_datasets(base)
     if not datasets:
         raise RuntimeError("No dirt datasets detected.")
 
-    for label, meas, bg in datasets:
-        print(f"\nProcessing {label}...")
-        if not meas:
+    for label, measurements, backgrounds in datasets:
+        print(f"\nProcessing {label}…")
+        if not measurements:
             print("   No spectra found; skipping.")
             continue
-
-        if bg:
-            print(f"   Loaded {len(meas)} measurements and {len(bg)} backgrounds")
+        if backgrounds:
+            print(f"   Loaded {len(measurements)} measurements and {len(backgrounds)} backgrounds")
         else:
-            print(f"   Loaded {len(meas)} measurements; no backgrounds provided")
+            print(f"   Loaded {len(measurements)} measurements; no backgrounds provided")
 
-        groups = group_spectra(meas)
+        groups = group_signals(measurements)
         print(f"   Split into {len(groups)} group(s)")
-        plot_root = base / "plots"
+
         for gi, group in enumerate(groups, start=1):
-            output_dir = plot_root / label.replace("/", "_").lower() / f"group_{gi:02d}"
-
-            junk = is_junk_group(group)
-            q_specs = [spectrum_quality(s) for s in group]
-            try:
-                avg = average_spectra(group, n_points=1000)
-                q_avg = spectrum_quality(avg)
-            except Exception:
-                q_avg = 0.0
-            print(f"   Group {gi}: junk={junk}; quality_mean={np.mean(q_specs):.3f}; quality_avg={q_avg:.3f}")
-
+            junk, q_mean, q_avg = describe_group(group)
+            print(f"   Group {gi}: junk={junk}; quality_mean={q_mean:.3f}; quality_avg={q_avg:.3f}")
             if junk:
-                print(f"   Group {gi}: Skipping analysis (identified as junk)")
-                
+                print("      Skipping analysis (identified as junk)")
+                continue
 
-            result = analyze(
-                measurements=group,
-                references=refs,
-                backgrounds=bg,
-                config=CFG,
-                visualize=True,
-                viz_output_dir=str(output_dir),
-                viz_show=False,
-            )
+            detection, templates = run_pipeline(group, backgrounds, references, species_filter)
 
-            r2 = float(result.metrics.get("fit_R2", 0.0))
-            print(f"   Group {gi}: R²={r2:.4f}; detections={len(result.detections)}")
-            if result.detections:
-                print("      Detections:")
-                for d in result.detections:
+            r2 = detection.meta.get("fit_R2", 0.0)
+            print(f"      R²={r2:.4f}; detections={len(detection.detections)}")
+            best_fwhm = templates.meta.get("fwhm_search", {}).get("best_fwhm_nm")
+            if best_fwhm is not None:
+                print(f"        Best FWHM ≈ {float(best_fwhm):.3f} nm")
+            if detection.detections:
+                for det in detection.detections:
+                    coeff = det.meta.get("coeff")
+                    bands_hit = det.meta.get("bands_hit")
                     print(
-                        f"        - {d['species']}: score={d.get('score', d.get('fve', 0.0)):.4f}, "
-                        f"coeff={d.get('coeff', 0.0):.4f}, bands={d.get('bands_hit', 0)}"
+                        f"        - {det.species}: score={det.score:.4f}"
+                        + (f", coeff={coeff:.4f}" if coeff is not None else "")
+                        + (f", bands={bands_hit}" if bands_hit is not None else "")
                     )
             else:
-                print("      No detections above threshold")
+                print("        No detections above threshold")
 
 
 if __name__ == "__main__":

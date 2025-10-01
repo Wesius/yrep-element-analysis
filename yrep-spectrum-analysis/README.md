@@ -1,132 +1,124 @@
 ## yrep_spectrum_analysis
 
-Spectrum-analysis pipeline for emission spectra: preprocessing → template generation → NNLS-based species detection. 
+Composable spectral analysis toolkit built around simple dataclasses and pure functions.
 
-Public API: `AnalysisConfig`, `Spectrum`, `analyze`.
+### Core dataclasses
+- `Signal`: 1-D wavelength/intensity arrays plus a lightweight `meta` dict.
+- `References`: per-species raw line lists, each stored as `(wavelength_nm, intensity)` arrays.
+- `Templates`: Gaussian-broadened matrix aligned to a signal grid with companion species/band metadata.
+- `DetectionResult`: processed signal + detections list (each detection holds per-species `meta`).
 
 ### Quickstart (see `run_with_library.py`)
 
 ```python
 from pathlib import Path
 
-from yrep_spectrum_analysis import AnalysisConfig, analyze
-from yrep_spectrum_analysis.utils import load_batch, load_references, group_spectra
-
-base = Path(__file__).resolve().parent
-
-# 1) Load reference line lists (CSV directory with wavelength/species/intensity)
-refs = load_references(base / "data" / "lists", element_only=True)
-
-# 2) Load spectra (directories of .txt files)
-meas_root = base / "data" / "StandardsTest" / "Copper" / "Copper"
-bg_root = base / "data" / "StandardsTest" / "Copper" / "BG"
-measurements, backgrounds = load_batch(meas_root, bg_root)
-
-# (Optional) Group similar spectra and analyze each group
-groups = group_spectra(measurements)
-
-cfg = AnalysisConfig(
-    fwhm_nm=0.75,
-    grid_step_nm=None,
-    species=["Na", "K", "Ca", "Cu", "Zn", "Pb"],
-    baseline_strength=0.5,
-    continuum_strategy="both", # If data is good, try "arpls"
-    regularization=0.0,
-    min_bands_required=5,
-    presence_threshold=0,  # minimum FVE to display
-    top_k=0, # all top elements
-    min_wavelength_nm=300, # yrep spectrometer most accurate in this range for some reason
-    max_wavelength_nm=600,
-    auto_trim_left=False, # normally better to do manually above
-    auto_trim_right=False,
-    align_background=False, # works occasionally
-    # depending on data quality, the following can help a lot. try these values: 
-    search_shift=False, 
-    shift_search_iterations=0, # 10
-    shift_search_spread=0, # absolute nm window
-    search_fwhm=False,
-    fwhm_search_iterations=0, # 10
-    fwhm_search_spread=0, # 1 (nm)
+from yrep_spectrum_analysis import (
+    average_signals,
+    build_templates,
+    fwhm_search,
+    continuum_remove_arpls,
+    continuum_remove_rolling,
+    detect_nnls,
+    resample,
+    shift_search,
+    subtract_background,
+    trim,
+)
+from yrep_spectrum_analysis.utils import (
+    expand_species_filter,
+    group_signals,
+    is_junk_group,
+    load_references,
+    load_signals_from_dir,
 )
 
-for i, group in enumerate(groups, start=1):
-    result = analyze(
-        measurements=group,
+base = Path(__file__).resolve().parent
+refs = load_references(base / "data" / "lists", element_only=False)
+measurements = load_signals_from_dir(base / "data" / "StandardsTest" / "Copper" / "Copper")
+backgrounds = load_signals_from_dir(base / "data" / "StandardsTest" / "Copper" / "BG")
+species_filter = expand_species_filter(refs.lines.keys(), ["CU", "ZN", "PB"])
+
+for group in group_signals(measurements):
+    if is_junk_group(group):
+        continue
+
+    signal = average_signals(group, n_points=1200)
+    background = average_signals(backgrounds, n_points=1200) if backgrounds else None
+
+    processed = trim(signal, min_nm=300, max_nm=600)
+    processed = resample(processed, n_points=1500)
+    if background is not None:
+        processed = subtract_background(processed, background, align=False)
+    processed = continuum_remove_arpls(processed, strength=0.5)
+    processed = continuum_remove_rolling(processed, strength=0.5)
+
+    templates = build_templates(
+        processed,
         references=refs,
-        backgrounds=backgrounds,
-        config=cfg,
-        visualize=True,
-        viz_output_dir=str(base / "plots" / "copper" / f"group_{i:02d}"),
-        viz_show=False,
+        fwhm_nm=0.75,
+        species_filter=species_filter,
     )
-    print("R²=", float(result.metrics.get("fit_R2", 0.0)))
-    for d in result.detections:
-        print(d["species"], d.get("score", d.get("fve", 0.0)), d.get("bands_hit", 0))
+    templates = fwhm_search(
+        processed,
+        references,
+        initial_fwhm_nm=0.75,
+        spread_nm=0.2,
+        iterations=3,
+        species_filter=species_filter,
+    )
+    processed = shift_search(processed, templates, spread_nm=0.5, iterations=3)
+    result = detect_nnls(processed, templates, presence_threshold=0.02, min_bands=5)
+
+    print(result.meta.get("fit_R2"))
+    for det in result.detections:
+        print(det.species, det.score, det.meta.get("bands_hit"))
 ```
 
-`analyze(...)` returns an `AnalysisResult` with:
-- `metrics`: `{"fit_R2": float}`
-- `detections`: list of dicts with `species`, `score` (FVE), `fve`, `coeff`, `bands_hit`
-- `detection`: detailed single-run `DetectionResult`
+### Building custom pipelines
 
-Visualizer files are saved when `visualize=True` to `viz_output_dir`.
-
-### Configuration reference
-
-- **AnalysisConfig**
-  - Instrument and core
-    - **fwhm_nm (float, default 2.0)**: Full width at half maximum used to broaden reference lines when building Gaussian templates; also sizes band regions.
-    - **grid_step_nm (float | None, default None)**: Uniform interpolation step for the working wavelength grid. If `None`, derived from data (median positive spacing) with a minimum of ~1000 samples.
-    - **average_n_points (int | None, default None)**: Averaging grid points when combining multiple spectra. If `None`, defaults to 1000 internally.
-    - **species (list[str] | None)**: Optional whitelist of species symbols (case-insensitive base symbols) to consider.
-  - Tweaks
-    - **baseline_strength (float, default 0.5)**: 0..1 knob that scales continuum removal windows and smoothing. Larger = broader/lower baseline.
-    - **continuum_strategy ("arpls" | "rolling" | "both", default "both")**: Continuum removal mode. `arpls`: robust ARPLS baseline subtraction. `rolling`: upper-envelope subtraction. `both`: ARPLS then rolling envelope (recommended).
-    - **regularization (float, default 0.0)**: Ridge λ for the NNLS fit (Tikhonov via augmentation). `0.0` disables; ~1e-2 light, ~1e-1 stronger.
-    - **min_bands_required (int, default 2)**: Minimum corroborated band regions per species required to count as detected (when band info is available).
-    - **presence_threshold (float | None, default None)**: FVE threshold (fraction of total variance explained) to accept a species. If `None`, defaults to `0.02`.
-    - **top_k (int, default 5)**: Keep top-K detections by score. `<= 0` keeps all.
-  - Preprocessing trims
-    - **min_wavelength_nm (float | None)** / **max_wavelength_nm (float | None)**: Explicit wavelength limits to keep.
-    - **auto_trim_left (bool, default False)** / **auto_trim_right (bool, default False)**: Auto-detect and trim off extreme left/right spikes using slope heuristics.
-  - Background handling
-    - **align_background (bool, default False)**: If true, registers background to measurement via phase correlation before subtraction. If false, subtracts as-is.
-    - **background_fn (callable | None)**: Advanced override for background subtraction/registration. Signature `(wl, y_meas, wl_bg, y_bg, config) -> (y_sub, params_dict)`.
-  - Continuum override
-    - **continuum_fn (callable | None)**: Advanced override for continuum removal. Signature `(wl, y, strength) -> (y_cr, baseline)`.
-  - Search controls (coarse optimization inside detection)
-    - **search_shift (bool, default True)**: Enable iterative coarse wavelength alignment of the observed signal to templates.
-    - **shift_search_iterations (int, default 1)**: Number of refinement iterations; the shift step reduces each iteration.
-    - **shift_search_spread (float, default 0.0)**: Absolute nm window for shift search: search range = `±shift_search_spread`. Set `<= 0` to disable.
-    - **search_fwhm (bool, default True)**: Enable FWHM search by rebuilding templates around the current `fwhm_nm`.
-    - **fwhm_search_iterations (int, default 1)**: Iterative narrowing of the candidate bracket around `fwhm_nm`.
-    - **fwhm_search_spread (float, default 0.5)**: Relative bracket half-width for the first iteration: `width = fwhm_nm × fwhm_search_spread`.
-  - Masking
-    - **mask (list[tuple[float, float]] | None, default None)**: Post-preprocessing wavelength intervals to zero out (e.g., instrument artifacts).
-
-### API surface
+Every preprocessing stage is a `Signal -> Signal` function. Compose them explicitly to suit your dataset.
 
 ```python
-from yrep_spectrum_analysis import AnalysisConfig, Spectrum, analyze
+history = []
+signal = average_signals(group, n_points=1200)
+history.append(("input", signal))
+
+processed = trim(signal, min_nm=300, max_nm=600)
+history.append(("trim", processed))
+processed = resample(processed, n_points=1500)
+history.append(("resample", processed))
+processed = subtract_background(processed, background, align=False)
+history.append(("background", processed))
+processed = continuum_remove_arpls(processed, strength=0.5)
+history.append(("continuum_arpls", processed))
+processed = continuum_remove_rolling(processed, strength=0.5)
+history.append(("continuum_rolling", processed))
+
+templates = build_templates(processed, references, fwhm_nm=0.75)
+templates = fwhm_search(
+    processed,
+    references,
+    initial_fwhm_nm=0.75,
+    spread_nm=0.2,
+    iterations=3,
+)
+processed = shift_search(processed, templates, spread_nm=0.5, iterations=3)
+history.append(("shift", processed))
+
+result = detect_nnls(processed, templates, presence_threshold=0.02, min_bands=5)
 ```
 
-`analyze(measurements, references, *, backgrounds=None, config=None, visualize=False, viz_output_dir=None, viz_show=False)`
-- `measurements`: sequence of objects with `.wavelength` and `.intensity` arrays (`Spectrum` or similar)
-- `references`: DataFrame or tuple/dict of `(species, wavelength_nm, intensity)`; see `utils.load_references`
-- `backgrounds`: optional sequence of background spectra
-- `visualize`: generate and save plots
-- `viz_output_dir`: output directory for plots (default `./debug_plots`)
-- `viz_show`: show plots interactively
+### Utilities
+- `utils.load_signals_from_dir(path)` → list of `Signal` instances from `.txt` spectra.
+- `utils.group_signals(signals)` → cosine-similarity clusters for batch processing.
+- `utils.signal_quality(signal)` / `utils.is_junk_group(signals)` → quick QC heuristics.
+- `utils.expand_species_filter(ref_species, requested)` → expand base elements to ionized labels present in references.
 
-Utilities used in the example:
-- `utils.load_references(lists_dir, element_only=True)`: reads CSVs with line lists and returns a normalized DataFrame. When `element_only=True` (default), species like "Fe I"/"Fe II" are collapsed to base symbols ("FE"). Set `element_only=False` to keep ionization states ("FE I", "FE II") and build per-ion templates.
-- `utils.load_batch(meas_root, bg_root)`: reads `.txt` spectra into `Spectrum` objects
-- `utils.group_spectra(measurements)`: clusters similar spectra to process them as groups
+### Visualization
 
-### Notes
+Capture whichever stages you need (as shown above) and plot them with your preferred tool; each step simply returns a new `Signal`.
 
-- Species normalization: by default `load_references(..., element_only=True)` collapses species to base symbols (e.g., "Fe I" → "FE"). If you need ion-specific templates, call `load_references(..., element_only=False)`. Filtering via `AnalysisConfig.species` always accepts base symbols (e.g., "Fe") and will match either collapsed or ion-specific references.
-- When `top_k <= 0`, all detections are returned in score-descending order.
-- Visualization saves numbered PNGs for each step of the pipeline.
-
-
+### Migration Notes
+- The legacy `AnalysisConfig` and `PreprocessResult` types have been removed.
+- Old pipeline helpers (`_preprocess.py`, `_detect.py`, `_templates.py`) were replaced by pure functions under `yrep_spectrum_analysis.pipeline`.

@@ -7,7 +7,12 @@ requires-python = ">=3.12"
 dependencies = ["yrep-spectrum-analysis"]
 
 [tool.uv.workspace]
-members = ["yrep-spectrum-analysis", "."]
+members = [
+    "yrep-spectrum-analysis",
+    ".",
+    "yrep-gui",
+]
 
 [tool.uv.sources]
 yrep-spectrum-analysis = { workspace = true }
+yrep-gui = { workspace = true }

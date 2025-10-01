@@ -1,6 +1,7 @@
 # YREP Spectral Analysis
 
-Repo for running spectral analysis on various spectrometer outputs.
+Repo for running spectral analysis on various spectrometer outputs using a
+fully composable function-first pipeline.
 
 ## Setup (uv)
 
@@ -41,4 +42,3 @@ For details, see [yrep-spectrum-analysis/README.md](./yrep-spectrum-analysis/REA
 
 ### NLSS Reconstruction (Pb)
 <img width="5032" height="3843" alt="10_nnls_fitting" src="https://github.com/user-attachments/assets/e8f54d08-2159-410f-8bff-77d17c1f72ee" />
-

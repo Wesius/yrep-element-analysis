@@ -1,0 +1,16 @@
+[project]
+name = "yrep-gui"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyqt6",
+    "yrep-spectrum-analysis",
+]
+
+[tool.uv.sources]
+yrep-spectrum-analysis = { workspace = true }
+
+[project.scripts]
+yrep-gui = "yrep_gui.app:main"
