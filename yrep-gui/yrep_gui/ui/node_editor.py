@@ -36,7 +36,8 @@ class NodeScene(QGraphicsScene):
     def __init__(self, editor: "NodeEditor") -> None:
         super().__init__(editor)
         self._editor = editor
-        self.setSceneRect(-4000, -3000, 8000, 6000)
+        # Start with reasonable bounds, will expand as needed
+        self.setSceneRect(-2000, -1500, 4000, 3000)
 
     @property
     def editor(self) -> "NodeEditor":
@@ -102,14 +103,14 @@ class NodeView(QGraphicsView):
 
     def __init__(self, scene: NodeScene, parent: QWidget | None = None) -> None:
         super().__init__(scene, parent)
-        self.setRenderHints(QPainter.RenderHint.Antialiasing)
-        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+        self.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setBackgroundBrush(BACKGROUND_COLOR)
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setAcceptDrops(True)
         self.viewport().setAcceptDrops(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -119,12 +120,23 @@ class NodeView(QGraphicsView):
         self._space_pan_shortcut = False
 
     def wheelEvent(self, event):  # noqa: ANN001 - UI callback
+        # Zoom with mouse wheel, with limits to prevent extreme zoom
         zoom_in_factor = 1.15
         zoom_out_factor = 1 / zoom_in_factor
+
+        # Get current scale
+        current_scale = self.transform().m11()
+
+        # Apply zoom limits (0.1x to 3.0x)
         if event.angleDelta().y() > 0:
-            self.scale(zoom_in_factor, zoom_in_factor)
+            # Zoom in
+            if current_scale < 3.0:
+                self.scale(zoom_in_factor, zoom_in_factor)
         else:
-            self.scale(zoom_out_factor, zoom_out_factor)
+            # Zoom out
+            if current_scale > 0.1:
+                self.scale(zoom_out_factor, zoom_out_factor)
+
         event.accept()
 
     def mousePressEvent(self, event):  # noqa: ANN001 - UI callback
@@ -142,6 +154,7 @@ class NodeView(QGraphicsView):
         if self._panning:
             delta = event.position() - self._pan_start
             self._pan_start = event.position()
+            # Smooth panning using scrollbars
             hbar = self.horizontalScrollBar()
             vbar = self.verticalScrollBar()
             hbar.setValue(int(hbar.value() - delta.x()))
@@ -168,6 +181,38 @@ class NodeView(QGraphicsView):
             self._space_pan_shortcut = True
             event.accept()
             return
+
+        # Arrow key navigation
+        pan_amount = 50
+        if event.key() == Qt.Key.Key_Left:
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - pan_amount)
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Right:
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + pan_amount)
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Up:
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - pan_amount)
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Down:
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() + pan_amount)
+            event.accept()
+            return
+
+        # Home key - fit all nodes
+        if event.key() == Qt.Key.Key_Home:
+            self.fit_all_nodes()
+            event.accept()
+            return
+
+        # Zero key - reset zoom
+        if event.key() == Qt.Key.Key_0 and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            self.reset_zoom()
+            event.accept()
+            return
+
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):  # noqa: ANN001 - UI callback
@@ -200,6 +245,50 @@ class NodeView(QGraphicsView):
                 event.acceptProposedAction()
                 return
         super().dropEvent(event)
+
+    # View navigation helpers ---------------------------------------------
+    def fit_all_nodes(self) -> None:
+        """Zoom and pan to fit all nodes in the viewport."""
+        items = [item for item in self.scene().items() if hasattr(item, "definition")]
+        if not items:
+            # No nodes, center on origin
+            self.centerOn(0, 0)
+            self.resetTransform()
+            return
+
+        # Get bounding rect of all nodes
+        rect = items[0].sceneBoundingRect()
+        for item in items[1:]:
+            rect = rect.united(item.sceneBoundingRect())
+
+        # Add padding
+        padding = 100
+        rect.adjust(-padding, -padding, padding, padding)
+
+        # Fit the rect in view
+        self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+        # Limit zoom to reasonable range
+        transform = self.transform()
+        scale = transform.m11()  # horizontal scale factor
+        if scale > 2.0:
+            self.resetTransform()
+            self.scale(2.0, 2.0)
+            self.centerOn(rect.center())
+        elif scale < 0.1:
+            self.resetTransform()
+            self.scale(0.1, 0.1)
+            self.centerOn(rect.center())
+
+    def reset_zoom(self) -> None:
+        """Reset zoom to 100% (1:1 scale)."""
+        center = self.mapToScene(self.viewport().rect().center())
+        self.resetTransform()
+        self.centerOn(center)
+
+    def center_view(self) -> None:
+        """Center view on the origin (0, 0)."""
+        self.centerOn(0, 0)
 
 
 
@@ -263,6 +352,7 @@ class NodeEditor(QWidget):
         self._scene.clearSelection()
         node.setSelected(True)
         self._nodes.append(node)
+        self.update_scene_bounds()
         return node
 
     def add_node_by_identifier(self, identifier: str, position: QPointF | None = None) -> NodeItem:
@@ -331,6 +421,26 @@ class NodeEditor(QWidget):
         for port in (*node.inputs, *node.outputs):
             for edge in list(port.edges):
                 edge.update_path()
+
+    def update_scene_bounds(self) -> None:
+        """Expand scene rect to include all nodes with padding."""
+        if not self._nodes:
+            return
+
+        # Get bounding rect of all nodes
+        rect = self._nodes[0].sceneBoundingRect()
+        for node in self._nodes[1:]:
+            rect = rect.united(node.sceneBoundingRect())
+
+        # Add generous padding
+        padding = 1000
+        rect.adjust(-padding, -padding, padding, padding)
+
+        # Expand scene rect if needed (never shrink it to avoid jarring jumps)
+        current = self._scene.sceneRect()
+        new_rect = current.united(rect)
+        if new_rect != current:
+            self._scene.setSceneRect(new_rect)
 
     # ------------------------------------------------------------------
     # Internals
@@ -478,6 +588,7 @@ class NodeEditor(QWidget):
                 continue
             self._connect_nodes(source_node, src_port, target_node, dst_port)
 
+        self.update_scene_bounds()
         self.nodeSelected.emit(self.selected_node())
 
     @property

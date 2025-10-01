@@ -14,3 +14,9 @@ debug_plots/
 .ruff_cache/
 plots/
 notes/
+filecollector.py
+filecollector.txt
+
+# Environment variables
+.env
+.env.local

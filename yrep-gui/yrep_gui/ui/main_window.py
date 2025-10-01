@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 from PyQt6.QtCore import Qt, QMimeData
-from PyQt6.QtGui import QDrag
+from PyQt6.QtGui import QDrag, QAction, QKeySequence
 from PyQt6.QtWidgets import (
+    QDialog,
     QDockWidget,
     QFileDialog,
     QListWidget,
@@ -28,6 +29,7 @@ from yrep_gui.services.pipeline_runner import PipelineRunner
 from yrep_gui.ui.inspector import InspectorPanel
 from yrep_gui.ui.node_editor import NODE_MIME_TYPE, NodeEditor
 from yrep_gui.ui.node_item import NodeConnection, NodeItem, NodePort
+from yrep_gui.ui.workflow_dialog import WorkflowBuilderDialog
 
 
 class GraphExecutionError(RuntimeError):
@@ -140,7 +142,35 @@ class MainWindow(QMainWindow):
         file_menu.addAction("Open Graph…", self._action_open_graph)
         file_menu.addAction("Save Graph", self._action_save_graph)
         file_menu.addSeparator()
+        file_menu.addAction("Generate Workflow with AI…", self._action_generate_workflow)
+        file_menu.addSeparator()
         file_menu.addAction("Quit", self.close)
+
+        view_menu = menu_bar.addMenu("View")
+        assert isinstance(view_menu, QMenu)
+
+        fit_action = QAction("Fit All Nodes", self)
+        fit_action.setShortcut(QKeySequence("Home"))
+        fit_action.triggered.connect(self._action_fit_all_nodes)
+        view_menu.addAction(fit_action)
+
+        reset_action = QAction("Reset Zoom", self)
+        reset_action.setShortcut(QKeySequence("0"))
+        reset_action.triggered.connect(self._action_reset_zoom)
+        view_menu.addAction(reset_action)
+
+        view_menu.addAction("Center View", self._action_center_view)
+        view_menu.addSeparator()
+
+        zoom_in_action = QAction("Zoom In", self)
+        zoom_in_action.setShortcut(QKeySequence("+"))
+        zoom_in_action.triggered.connect(self._action_zoom_in)
+        view_menu.addAction(zoom_in_action)
+
+        zoom_out_action = QAction("Zoom Out", self)
+        zoom_out_action.setShortcut(QKeySequence("-"))
+        zoom_out_action.triggered.connect(self._action_zoom_out)
+        view_menu.addAction(zoom_out_action)
 
         run_menu = menu_bar.addMenu("Run")
         assert isinstance(run_menu, QMenu)
@@ -149,12 +179,6 @@ class MainWindow(QMainWindow):
 
         help_menu = menu_bar.addMenu("Help")
         assert isinstance(help_menu, QMenu)
-        help_menu.addAction("About", self._show_about_dialog)
-        run_menu = menu_bar.addMenu("Run")
-        run_menu.addAction("Run Graph", self._action_run_graph)
-        run_menu.addAction("Stop", self._action_unimplemented)
-
-        help_menu = menu_bar.addMenu("Help")
         help_menu.addAction("About", self._show_about_dialog)
 
     # ------------------------------------------------------------------
@@ -218,6 +242,24 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage(f"Saved graph: {file_path.name}", 3000)
 
+    def _action_generate_workflow(self) -> None:
+        """Open AI workflow builder dialog."""
+        dialog = WorkflowBuilderDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            graph_data = dialog.get_generated_graph()
+            if graph_data:
+                try:
+                    self._node_editor.load_graph_data(graph_data)
+                    if self._inspector_panel is not None:
+                        self._inspector_panel.set_node(self._node_editor.selected_node())
+                    self.statusBar().showMessage("AI-generated workflow loaded", 3000)
+                except Exception as exc:
+                    QMessageBox.critical(
+                        self,
+                        "Load Failed",
+                        f"Failed to load generated workflow:\n{exc}"
+                    )
+
     def _action_run_graph(self) -> None:
         try:
             order, node_map, incoming, dependents = self._prepare_execution()
@@ -242,6 +284,26 @@ class MainWindow(QMainWindow):
             "About YREP Node Editor",
             "A PyQt6 interface for composing spectral analysis pipelines.",
         )
+
+    def _action_fit_all_nodes(self) -> None:
+        self._node_editor.view.fit_all_nodes()
+        self.statusBar().showMessage("View fitted to all nodes", 2000)
+
+    def _action_reset_zoom(self) -> None:
+        self._node_editor.view.reset_zoom()
+        self.statusBar().showMessage("Zoom reset to 100%", 2000)
+
+    def _action_center_view(self) -> None:
+        self._node_editor.view.center_view()
+        self.statusBar().showMessage("View centered on origin", 2000)
+
+    def _action_zoom_in(self) -> None:
+        self._node_editor.view.scale(1.15, 1.15)
+        self.statusBar().showMessage("Zoomed in", 1000)
+
+    def _action_zoom_out(self) -> None:
+        self._node_editor.view.scale(1 / 1.15, 1 / 1.15)
+        self.statusBar().showMessage("Zoomed out", 1000)
 
     # ------------------------------------------------------------------
     # Palette / inspector plumbing
@@ -582,6 +644,10 @@ class MainWindow(QMainWindow):
                 self._append_log(
                     f"- {title}: Signal batch with {len(value)} entries"
                 )
+            elif isinstance(value, str) and len(value) > 100:
+                # Agent outputs and reports (truncate in log, full output is stored)
+                preview = value[:200] + "..." if len(value) > 200 else value
+                self._append_log(f"- {title}: {preview}")
             else:
                 self._append_log(f"- {title}: {value}")
 
