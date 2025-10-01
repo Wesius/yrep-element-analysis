@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -99,7 +100,34 @@ class InspectorPanel(QWidget):
     def _create_editor_widget(self, key: str, value: Any, default: Any) -> QWidget:
         self._updating = True
         widget: QWidget
-        if isinstance(value, bool) or isinstance(default, bool):
+
+        # Special handling for agent configuration fields
+        if key == "model":
+            combo = QComboBox(self)
+            models = ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo", "gpt-4o", "gpt-4o-mini"]
+            combo.addItems(models)
+            current_val = str(value) if value else "gpt-4"
+            if current_val in models:
+                combo.setCurrentText(current_val)
+            combo.currentTextChanged.connect(lambda val, k=key: self._on_str_changed(k, val))
+            widget = combo
+        elif key == "task":
+            combo = QComboBox(self)
+            tasks = ["general", "quality_control", "report_generator", "parameter_optimizer"]
+            combo.addItems(tasks)
+            current_val = str(value) if value else "general"
+            if current_val in tasks:
+                combo.setCurrentText(current_val)
+            combo.currentTextChanged.connect(lambda val, k=key: self._on_str_changed(k, val))
+            widget = combo
+        elif key in {"custom_prompt"}:
+            # Multi-line text editor for prompts
+            editor = QPlainTextEdit(self)
+            editor.setPlainText(str(value) if value else "")
+            editor.setMaximumHeight(120)
+            editor.textChanged.connect(lambda k=key, e=editor: self._on_text_changed(k, e.toPlainText()))
+            widget = editor
+        elif isinstance(value, bool) or isinstance(default, bool):
             checkbox = QCheckBox(self)
             checkbox.setChecked(bool(value))
             checkbox.stateChanged.connect(lambda state, k=key: self._on_bool_changed(k, state))
@@ -127,6 +155,9 @@ class InspectorPanel(QWidget):
             line = QLineEdit(container)
             line.setText(str(value) if value is not None else "")
             line.setClearButtonEnabled(True)
+            if key == "api_key":
+                line.setEchoMode(QLineEdit.EchoMode.Password)
+                line.setPlaceholderText("Leave empty to use OPENAI_API_KEY env var")
             line.editingFinished.connect(lambda k=key, w=line: self._on_str_changed(k, w.text()))
             layout.addWidget(line, 1)
 
@@ -197,6 +228,11 @@ class InspectorPanel(QWidget):
         self._current_node.set_config_value(key, float(value))
 
     def _on_str_changed(self, key: str, value: str) -> None:
+        if self._updating or not self._current_node:
+            return
+        self._current_node.set_config_value(key, value)
+
+    def _on_text_changed(self, key: str, value: str) -> None:
         if self._updating or not self._current_node:
             return
         self._current_node.set_config_value(key, value)
