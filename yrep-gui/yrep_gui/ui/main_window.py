@@ -171,6 +171,53 @@ class MainWindow(QMainWindow):
     def _action_unimplemented(self) -> None:
         QMessageBox.information(self, "Not Implemented", "This feature is not implemented yet.")
 
+    def _action_open_graph(self) -> None:
+        start_dir = str(self._workspace_root)
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Graph",
+            start_dir,
+            "YREP Graph (*.yrep.json);;JSON (*.json);;All Files (*)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (OSError, json.JSONDecodeError) as exc:
+            QMessageBox.critical(self, "Load Failed", f"Could not load graph:\n{exc}")
+            return
+        try:
+            self._node_editor.load_graph_data(payload)
+        except Exception as exc:  # pragma: no cover - defensive
+            QMessageBox.critical(self, "Load Failed", f"Graph is invalid:\n{exc}")
+            return
+        if self._inspector_panel is not None:
+            self._inspector_panel.set_node(self._node_editor.selected_node())
+        self.statusBar().showMessage(f"Loaded graph: {Path(path).name}", 3000)
+
+    def _action_save_graph(self) -> None:
+        start_dir = str(self._workspace_root)
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Graph",
+            start_dir,
+            "YREP Graph (*.yrep.json);;JSON (*.json);;All Files (*)",
+        )
+        if not path:
+            return
+        file_path = Path(path)
+        if file_path.suffix == "":
+            file_path = file_path.with_suffix(".yrep.json")
+        payload = self._node_editor.export_graph_data()
+        try:
+            with open(file_path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2)
+        except OSError as exc:
+            QMessageBox.critical(self, "Save Failed", f"Could not save graph:\n{exc}")
+            return
+        self.statusBar().showMessage(f"Saved graph: {file_path.name}", 3000)
+
     def _action_run_graph(self) -> None:
         try:
             order, node_map, incoming, dependents = self._prepare_execution()
