@@ -21,7 +21,14 @@ from PyQt6.QtWidgets import (
 )
 
 from yrep_spectrum_analysis.types import DetectionResult, References, Signal, Templates
-from yrep_spectrum_analysis.utils import load_references, load_signals_from_dir, load_txt_spectrum
+from yrep_spectrum_analysis.utils import (
+    group_signals,
+    is_junk_group,
+    load_references,
+    load_signals_from_dir,
+    load_txt_spectrum,
+    signal_quality,
+)
 
 from yrep_gui.nodes import registry
 from yrep_gui.services.pipeline_runner import PipelineRunner
@@ -150,12 +157,6 @@ class MainWindow(QMainWindow):
         help_menu = menu_bar.addMenu("Help")
         assert isinstance(help_menu, QMenu)
         help_menu.addAction("About", self._show_about_dialog)
-        run_menu = menu_bar.addMenu("Run")
-        run_menu.addAction("Run Graph", self._action_run_graph)
-        run_menu.addAction("Stop", self._action_unimplemented)
-
-        help_menu = menu_bar.addMenu("Help")
-        help_menu.addAction("About", self._show_about_dialog)
 
     # ------------------------------------------------------------------
     # Actions
@@ -188,13 +189,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Load Failed", f"Could not load graph:\n{exc}")
             return
         try:
-            self._node_editor.load_graph_data(payload)
+            self.load_graph_payload(payload, label=Path(path).name)
         except Exception as exc:  # pragma: no cover - defensive
             QMessageBox.critical(self, "Load Failed", f"Graph is invalid:\n{exc}")
             return
-        if self._inspector_panel is not None:
-            self._inspector_panel.set_node(self._node_editor.selected_node())
-        self.statusBar().showMessage(f"Loaded graph: {Path(path).name}", 3000)
 
     def _action_save_graph(self) -> None:
         start_dir = str(self._workspace_root)
@@ -326,7 +324,9 @@ class MainWindow(QMainWindow):
                     raise GraphExecutionError(
                         f"Input {idx + 1} of '{node.definition.title}' expects one or more signals."
                     )
-                collected = [results[src_id] for src_id, _ in sorted(edges, key=lambda item: item[0])]
+                collected: List[Any] = []
+                for src_id, src_port in sorted(edges, key=lambda item: (item[0], item[1])):
+                    collected.append(self._extract_output(results, src_id, src_port, node, idx))
                 inputs.append(collected)
             else:
                 if not edges:
@@ -340,63 +340,103 @@ class MainWindow(QMainWindow):
                     raise GraphExecutionError(
                         f"Input {idx + 1} of '{node.definition.title}' must be connected exactly once."
                     )
-                src_id, _ = edges[0]
-                if src_id not in results:
-                    raise GraphExecutionError(
-                        f"Upstream node for input {idx + 1} of '{node.definition.title}' has no value."
-                    )
-                inputs.append(results[src_id])
+                src_id, src_port = edges[0]
+                inputs.append(self._extract_output(results, src_id, src_port, node, idx))
         return inputs
+
+    def _extract_output(
+        self,
+        results: Dict[int, Any],
+        src_id: int,
+        src_port: int,
+        target_node: NodeItem,
+        target_port: int,
+    ) -> Any:
+        if src_id not in results:
+            raise GraphExecutionError(
+                f"Upstream node feeding input {target_port + 1} of '{target_node.definition.title}' has no value."
+            )
+        value = results[src_id]
+        try:
+            return self._select_output_port(value, src_port)
+        except GraphExecutionError as exc:
+            raise GraphExecutionError(
+                f"Upstream output {src_port + 1} could not supply input {target_port + 1} of "
+                f"'{target_node.definition.title}': {exc}"
+            ) from exc
+
+    def _select_output_port(self, node_value: Any, port_index: int) -> Any:
+        if isinstance(node_value, tuple):
+            if port_index < len(node_value):
+                return node_value[port_index]
+            raise GraphExecutionError("tuple output does not have the requested port")
+        if port_index == 0:
+            return node_value
+        if isinstance(node_value, dict):
+            if port_index in node_value:
+                return node_value[port_index]
+            name_key = str(port_index)
+            if name_key in node_value:
+                return node_value[name_key]
+            raise GraphExecutionError("dict output does not include the requested port")
+        raise GraphExecutionError("upstream node did not expose multiple outputs")
 
     def _execute_node(self, node: NodeItem, inputs: List[Any]) -> Any:
         identifier = node.definition.identifier
         config = dict(node.config)
 
+        def wrap(value: Any) -> Any:
+            return self._normalize_outputs(node, value)
+
         if identifier == "load_signal":
-            return self._exec_load_signal(config)
+            return wrap(self._exec_load_signal(config))
         if identifier == "load_references":
-            return self._exec_load_references(config)
+            return wrap(self._exec_load_references(config))
         if identifier == "load_signal_batch":
-            return self._exec_load_signal_batch(config)
+            return wrap(self._exec_load_signal_batch(config))
+        if identifier == "group_signals":
+            return wrap(self._exec_group_signals(inputs, config))
+        if identifier == "select_best_group":
+            return wrap(self._exec_select_best_group(inputs, config))
         if identifier == "average_signals":
-            return self._exec_average_signals(inputs, config)
+            return wrap(self._exec_average_signals(inputs, config))
         if identifier == "plot_signal":
-            return self._exec_plot_signal(inputs, config)
+            return wrap(self._exec_plot_signal(inputs, config))
 
         func = self._pipeline_runner.get_callable(identifier)
 
         if identifier == "subtract_background":
             signal = inputs[0]
             background = inputs[1] if len(inputs) > 1 and inputs[1] is not None else None
-            return func(signal, background, align=bool(config.get("align", False)))
+            return wrap(func(signal, background, align=bool(config.get("align", False))))
 
         if identifier in {"build_templates"}:
             signal, references = inputs
             kwargs = self._build_templates_kwargs(config)
-            return func(signal, references, **kwargs)
+            return wrap(func(signal, references, **kwargs))
 
         if identifier == "shift_search":
             signal, templates = inputs
-            return func(
+            return wrap(func(
                 signal,
                 templates,
                 spread_nm=float(config.get("spread_nm", 0.5)),
                 iterations=int(config.get("iterations", 3)),
-            )
+            ))
 
         if identifier == "detect_nnls":
             signal, templates = inputs
-            return func(
+            return wrap(func(
                 signal,
                 templates,
                 presence_threshold=float(config.get("presence_threshold", 0.02)),
                 min_bands=int(config.get("min_bands", 5)),
-            )
+            ))
 
         if identifier == "mask":
             signal = inputs[0]
             intervals = self._coerce_intervals(config.get("intervals", []))
-            return func(signal, intervals=intervals)
+            return wrap(func(signal, intervals=intervals))
 
         if identifier == "resample":
             signal = inputs[0]
@@ -407,22 +447,56 @@ class MainWindow(QMainWindow):
                 kwargs["n_points"] = int(n_points)
             if step_nm:
                 kwargs["step_nm"] = float(step_nm)
-            return func(signal, **kwargs)
+            return wrap(func(signal, **kwargs))
 
         if identifier == "trim":
             signal = inputs[0]
             kwargs = self._coerce_trim_kwargs(config)
-            return func(signal, **kwargs)
+            return wrap(func(signal, **kwargs))
 
         if identifier in {"continuum_remove_arpls", "continuum_remove_rolling"}:
             signal = inputs[0]
             strength = float(config.get("strength", 0.5))
-            return func(signal, strength=strength)
+            return wrap(func(signal, strength=strength))
 
         # Unary fall-through (trim-like stages)
         if inputs:
-            return func(inputs[0], **config)
+            return wrap(func(inputs[0], **config))
         raise GraphExecutionError(f"Node '{node.definition.title}' has no inputs to execute.")
+
+    def _normalize_outputs(self, node: NodeItem, value: Any) -> Any:
+        expected = len(node.definition.outputs)
+        if expected <= 1:
+            return value
+        if isinstance(value, tuple):
+            if len(value) == expected:
+                return value
+            raise GraphExecutionError(
+                f"Node '{node.definition.title}' returned {len(value)} outputs but {expected} are defined."
+            )
+        if isinstance(value, list):
+            if len(value) == expected:
+                return tuple(value)
+            raise GraphExecutionError(
+                f"Node '{node.definition.title}' returned {len(value)} outputs but {expected} are defined."
+            )
+        if isinstance(value, dict):
+            ordered: List[Any] = []
+            for idx, name in enumerate(node.definition.outputs):
+                if idx in value:
+                    ordered.append(value[idx])
+                elif name in value:
+                    ordered.append(value[name])
+                elif str(idx) in value:
+                    ordered.append(value[str(idx)])
+                else:
+                    raise GraphExecutionError(
+                        f"Node '{node.definition.title}' did not provide output for port {idx + 1}."
+                    )
+            return tuple(ordered)
+        raise GraphExecutionError(
+            f"Node '{node.definition.title}' must return {expected} values; got {type(value).__name__}."
+        )
 
     def _exec_load_signal(self, config: Dict[str, Any]) -> Signal:
         path_str = str(config.get("path", "")).strip()
@@ -433,6 +507,85 @@ class MainWindow(QMainWindow):
             raise GraphExecutionError(f"Signal path does not exist: {path}")
         wavelength, intensity = load_txt_spectrum(path)
         return Signal(wavelength=wavelength, intensity=intensity, meta={"path": str(path)})
+
+    def _exec_group_signals(self, inputs: List[Any], config: Dict[str, Any]):
+        if not inputs:
+            raise GraphExecutionError("Group Signals requires a batch input.")
+        batch = self._flatten_signal_inputs(inputs[0])
+        if not batch:
+            raise GraphExecutionError("Group Signals received an empty batch.")
+        grid_points = int(config.get("grid_points", 1000))
+        groups_raw = group_signals(batch, grid_points=grid_points)
+        avg_callable = self._pipeline_runner.get_callable("average_signals")
+        payload = []
+        import numpy as np
+        for group in groups_raw:
+            qualities = [signal_quality(sig) for sig in group]
+            mean_quality = float(np.mean(qualities)) if qualities else 0.0
+            junk = bool(is_junk_group(group))
+            avg_quality = 0.0
+            try:
+                averaged = avg_callable(group, n_points=grid_points)
+                avg_quality = float(signal_quality(averaged))
+            except Exception:
+                avg_quality = 0.0
+            payload.append(
+                {
+                    "signals": group,
+                    "junk": junk,
+                    "quality_mean": mean_quality,
+                    "avg_quality": avg_quality,
+                    "size": len(group),
+                }
+            )
+        self._append_log(f"Grouped batch into {len(payload)} group(s)")
+        return payload
+
+    def _exec_select_best_group(self, inputs: List[Any], config: Dict[str, Any]):
+        if not inputs:
+            raise GraphExecutionError("Select Best Group requires grouped signals.")
+        groups = inputs[0]
+        if not isinstance(groups, list) or not groups:
+            raise GraphExecutionError("Select Best Group received no groups.")
+        metric = str(config.get("quality_metric", "avg_quality")).lower()
+        min_quality = float(config.get("min_quality", 0.0))
+        metric_key = "avg_quality" if metric not in {"avg_quality", "quality_mean"} else metric
+
+        def score(group_info: Dict[str, Any]) -> float:
+            return float(group_info.get(metric_key, 0.0))
+
+        best = None
+        best_score = float("-inf")
+        for idx, info in enumerate(groups):
+            signals = info.get("signals")
+            if not signals:
+                continue
+            current_score = score(info)
+            if info.get("junk") or current_score < min_quality:
+                continue
+            if current_score > best_score:
+                best = (idx, info, signals, current_score)
+                best_score = current_score
+
+        if best is None:
+            # Fall back to highest-scoring group regardless of junk/min
+            for idx, info in enumerate(groups):
+                signals = info.get("signals")
+                if not signals:
+                    continue
+                current_score = score(info)
+                if current_score > best_score:
+                    best = (idx, info, signals, current_score)
+                    best_score = current_score
+
+        if best is None:
+            raise GraphExecutionError("No viable groups found.")
+
+        idx, info, signals, best_score = best
+        self._append_log(
+            f"Selected group {idx + 1} (size={info.get('size')}, junk={info.get('junk')}, score={best_score:.3f})"
+        )
+        return signals
 
     def _exec_load_signal_batch(self, config: Dict[str, Any]):
         directory = str(config.get("directory", "")).strip()
@@ -507,6 +660,8 @@ class MainWindow(QMainWindow):
                     yield from _iter_items(sub)
             elif isinstance(item, Signal):
                 yield item
+            elif isinstance(item, dict) and "signals" in item:
+                yield from _iter_items(item.get("signals"))
         return list(_iter_items(value))
 
     def _build_templates_kwargs(self, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -564,26 +719,40 @@ class MainWindow(QMainWindow):
         for sink in sinks:
             value = results.get(sink.instance_id)
             title = sink.definition.title
+            if isinstance(value, tuple):
+                for idx, item in enumerate(value):
+                    label = f"{title} [out {idx + 1}]"
+                    self._append_log(self._describe_terminal_value(label, item))
+                continue
             if isinstance(value, DetectionResult):
-                self._append_log(f"- {title}: {len(value.detections)} detections")
-                for det in value.detections[:10]:
-                    self._append_log(
-                        f"    • {det.species}: score={det.score:.4f}, bands={det.meta.get('bands_hit', '?')}"
-                    )
-            elif isinstance(value, Signal):
-                self._append_log(
-                    f"- {title}: Signal with {value.wavelength.size} samples, meta keys={list(value.meta.keys())}"
+                self._append_log(self._describe_terminal_value(title, value))
+                continue
+            self._append_log(self._describe_terminal_value(title, value))
+
+    def _describe_terminal_value(self, title: str, value: Any) -> str:
+        if isinstance(value, DetectionResult):
+            lines = [f"- {title}: {len(value.detections)} detections"]
+            for det in value.detections[:10]:
+                lines.append(
+                    f"    • {det.species}: score={det.score:.4f}, bands={det.meta.get('bands_hit', '?')}"
                 )
-            elif isinstance(value, Templates):
-                self._append_log(
-                    f"- {title}: Templates for {len(value.species)} species"
-                )
-            elif isinstance(value, list):
-                self._append_log(
-                    f"- {title}: Signal batch with {len(value)} entries"
-                )
-            else:
-                self._append_log(f"- {title}: {value}")
+            return "\n".join(lines)
+        if isinstance(value, Signal):
+            return (
+                f"- {title}: Signal with {value.wavelength.size} samples, meta keys={list(value.meta.keys())}"
+            )
+        if isinstance(value, Templates):
+            return f"- {title}: Templates for {len(value.species)} species"
+        if isinstance(value, list):
+            return f"- {title}: Signal batch with {len(value)} entries"
+        return f"- {title}: {value}"
+
+    def load_graph_payload(self, payload: Dict[str, Any], *, label: str | None = None) -> None:
+        self._node_editor.load_graph_data(payload)
+        if self._inspector_panel is not None:
+            self._inspector_panel.set_node(self._node_editor.selected_node())
+        if label:
+            self.statusBar().showMessage(f"Loaded graph: {label}", 3000)
 
     def _append_log(self, message: str) -> None:
         if self._log_view is not None:

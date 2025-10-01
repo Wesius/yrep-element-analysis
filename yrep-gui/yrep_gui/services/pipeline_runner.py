@@ -44,6 +44,20 @@ def _build_templates(
     )
 
 
+def _shift_search(
+    signal: Any,
+    templates: Any,
+    *,
+    spread_nm: float,
+    iterations: int,
+    **kwargs: Any,
+):
+    """Align a signal while threading through the template payload unchanged."""
+
+    aligned_signal = shift_search(signal, templates, spread_nm=spread_nm, iterations=iterations, **kwargs)
+    return aligned_signal, templates
+
+
 @dataclass(slots=True)
 class PipelineNode:
     """Lightweight representation of a pipeline node definition."""
@@ -66,7 +80,7 @@ class PipelineRunner:
             "continuum_remove_arpls": continuum_remove_arpls,
             "continuum_remove_rolling": continuum_remove_rolling,
             "build_templates": _build_templates,
-            "shift_search": shift_search,
+            "shift_search": _shift_search,
             "detect_nnls": detect_nnls,
         }
 
@@ -78,4 +92,3 @@ class PipelineRunner:
 
     def run(self, graph: Iterable[PipelineNode]) -> None:
         raise NotImplementedError("Execution pipeline not yet implemented")
-

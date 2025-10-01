@@ -59,6 +59,22 @@ _REGISTRY: Dict[str, NodeDefinition] = {
     # ------------------------------------------------------------------
     # Aggregate / preprocess
     # ------------------------------------------------------------------
+    "group_signals": NodeDefinition(
+        identifier="group_signals",
+        title="Group Signals",
+        category="Aggregate",
+        inputs=("SignalBatch",),
+        outputs=("SignalGroupBatch",),
+        default_config={"grid_points": 1000},
+    ),
+    "select_best_group": NodeDefinition(
+        identifier="select_best_group",
+        title="Select Best Group",
+        category="Aggregate",
+        inputs=("SignalGroupBatch",),
+        outputs=("SignalBatch",),
+        default_config={"quality_metric": "avg_quality", "min_quality": 0.0},
+    ),
     "average_signals": NodeDefinition(
         identifier="average_signals",
         title="Average Signals",
@@ -141,7 +157,7 @@ _REGISTRY: Dict[str, NodeDefinition] = {
         title="Shift Search",
         category="Alignment",
         inputs=("Signal", "Template"),
-        outputs=("Signal",),
+        outputs=("Signal", "Template"),
         default_config={"spread_nm": 0.5, "iterations": 3},
     ),
     "detect_nnls": NodeDefinition(

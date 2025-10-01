@@ -255,28 +255,33 @@ class NodeItem(QGraphicsRectItem):
         for index, name in enumerate(self.definition.inputs):
             allow_multi = index in self.definition.multi_input_ports
             optional = index in self.definition.optional_input_ports
+            display_name = name
+            if self.definition.identifier == "subtract_background":
+                display_name = "Foreground" if index == 0 else "Background"
             port = NodePort(
                 self._editor,
                 self,
                 port_type="input",
-                name=name,
+                name=display_name,
                 index=index,
                 allow_multiple=allow_multi,
                 optional=optional,
             )
             y = HEADER_HEIGHT + index * PORT_SPACING
             port.setPos(self.rect().left() + 8, y)
-            label = QGraphicsSimpleTextItem(name, self)
+            label = QGraphicsSimpleTextItem(display_name, self)
             label.setFont(label_font)
             label.setBrush(QBrush(COLOR_PORT_LABEL))
             label.setPos(20, y - label.boundingRect().height() / 2)
             self.inputs.append(port)
+            self._port_labels.append(label)
 
         for index, name in enumerate(self.definition.outputs):
-            port = NodePort(self._editor, self, port_type="output", name=name, index=index)
+            display_name = name
+            port = NodePort(self._editor, self, port_type="output", name=display_name, index=index)
             y = HEADER_HEIGHT + index * PORT_SPACING
             port.setPos(self.rect().right() - 8, y)
-            label = QGraphicsSimpleTextItem(name, self)
+            label = QGraphicsSimpleTextItem(display_name, self)
             label.setFont(label_font)
             label.setBrush(QBrush(COLOR_PORT_LABEL))
             label.setPos(self.rect().right() - 20 - label.boundingRect().width(), y - label.boundingRect().height() / 2)
