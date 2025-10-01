@@ -466,6 +466,10 @@ class MainWindow(QMainWindow):
         n_points = int(config.get("n_points", 1000))
         func = self._pipeline_runner.get_callable("average_signals")
         return func(flattened, n_points=n_points)
+    
+    
+    # _exec_plot_detection_results()
+
 
     def _exec_plot_signal(self, inputs: List[Any], config: Dict[str, Any]) -> Signal:
         if not inputs:
