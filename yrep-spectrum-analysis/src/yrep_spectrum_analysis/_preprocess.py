@@ -206,7 +206,44 @@ def _trim_spectrum(spec: Spectrum, wl_min_keep: float, wl_max_keep: float) -> Sp
     mask = np.asarray(left_ok & right_ok, dtype=bool)
     if not np.any(mask):
         return spec
-    return Spectrum(wavelength=spec.wavelength[mask], intensity=spec.intensity[mask])
+    return Spectrum(
+        wavelength=spec.wavelength[mask],
+        intensity=spec.intensity[mask],
+        metadata=spec.metadata,
+    )
+
+
+def _mask_intervals_to_bool(
+    wavelength: np.ndarray, mask_intervals: Sequence[Tuple[float, float]]
+) -> np.ndarray:
+    mask_total = np.zeros_like(wavelength, dtype=bool)
+    for interval in mask_intervals:
+        if not isinstance(interval, Sequence) or len(interval) != 2:
+            continue
+        a, b = interval
+        try:
+            lo = float(min(a, b))
+            hi = float(max(a, b))
+        except Exception:
+            continue
+        if not (np.isfinite(lo) and np.isfinite(hi) and hi > lo):
+            continue
+        mask_total |= (wavelength >= lo) & (wavelength <= hi)
+    return mask_total
+
+
+def _apply_mask_intervals(
+    spec: Spectrum, mask_intervals: Optional[Sequence[Tuple[float, float]]]
+) -> Spectrum:
+    if not mask_intervals:
+        return spec
+    wl = spec.wavelength
+    mask = _mask_intervals_to_bool(wl, mask_intervals)
+    if not np.any(mask):
+        return spec
+    intensity = spec.intensity.copy()
+    intensity[mask] = 0.0
+    return Spectrum(wavelength=wl, intensity=intensity, metadata=spec.metadata)
 
 
 
@@ -218,17 +255,30 @@ def preprocess(
     meas = _as_arrays(measurements)
     bg = _as_arrays(backgrounds) if backgrounds else []
 
-    # Optional explicit/automatic wavelength trims (left/right)
+    # Optional explicit/automatic wavelength trims (left/right) and early masking
     ts = config
-    if (
+    mask_intervals = getattr(ts, "mask", None)
+    need_trim = (
         getattr(ts, "min_wavelength_nm", None) is not None
         or getattr(ts, "max_wavelength_nm", None) is not None
         or getattr(ts, "auto_trim_left", False)
         or getattr(ts, "auto_trim_right", False)
-    ):
+    )
+
+    wl_min_keep = float("-inf")
+    wl_max_keep = float("inf")
+    if need_trim:
         wl_min_keep, wl_max_keep = _compute_trim_bounds(meas, ts)
+
+    if need_trim:
         meas = [_trim_spectrum(s, wl_min_keep, wl_max_keep) for s in meas]
-        bg = [_trim_spectrum(s, wl_min_keep, wl_max_keep) for s in bg] if bg else []
+        if bg:
+            bg = [_trim_spectrum(s, wl_min_keep, wl_max_keep) for s in bg]
+
+    if mask_intervals:
+        meas = [_apply_mask_intervals(s, mask_intervals) for s in meas]
+        if bg:
+            bg = [_apply_mask_intervals(s, mask_intervals) for s in bg]
 
 
     avg_meas = (
@@ -251,6 +301,11 @@ def preprocess(
         if bg
         else None
     )
+
+    if mask_intervals:
+        avg_meas = _apply_mask_intervals(avg_meas, mask_intervals)
+        if avg_bg is not None:
+            avg_bg = _apply_mask_intervals(avg_bg, mask_intervals)
 
     # Grid: restrict to measurement–background overlap to avoid edge artifacts
     if avg_bg is not None:
@@ -281,6 +336,13 @@ def preprocess(
         if avg_bg is not None
         else None
     )
+
+    if mask_intervals:
+        grid_mask = _mask_intervals_to_bool(wl_grid, mask_intervals)
+        if np.any(grid_mask):
+            y_meas[grid_mask] = 0.0
+            if y_bg is not None:
+                y_bg[grid_mask] = 0.0
     # Zero-pad tails to avoid large negative edge subtraction
     if y_bg is not None and avg_bg is not None:
         left_mask = wl_grid < float(np.min(avg_bg.wavelength))
@@ -325,22 +387,6 @@ def preprocess(
 
     # Final non-negativity
     y_cr = np.maximum(y_cr, 0.0)
-
-    # Apply optional wavelength mask: zero out y_cr in specified intervals
-    mask_intervals = getattr(config, "mask", None)
-    if mask_intervals:
-        for a, b in mask_intervals:
-            try:
-                a_f = float(a)
-                b_f = float(b)
-            except Exception:
-                continue
-            lo = min(a_f, b_f)
-            hi = max(a_f, b_f)
-            if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
-                m = (wl_grid >= lo) & (wl_grid <= hi)
-                if np.any(m):
-                    y_cr[m] = 0.0
 
     return PreprocessResult(
         wl_grid=wl_grid,
