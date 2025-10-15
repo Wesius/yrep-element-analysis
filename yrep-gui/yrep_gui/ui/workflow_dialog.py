@@ -48,8 +48,8 @@ class WorkflowBuilderDialog(QDialog):
         form_layout = QFormLayout()
 
         self._model_combo = QComboBox(self)
-        self._model_combo.addItems(["gpt-4", "gpt-4-turbo", "gpt-4o", "gpt-3.5-turbo"])
-        self._model_combo.setCurrentText("gpt-4o")
+        self._model_combo.addItems(["gpt-5", "gpt-5-pro", "gpt-4", "gpt-4-turbo", "gpt-4o", "gpt-3.5-turbo"])
+        self._model_combo.setCurrentText("gpt-5")
         form_layout.addRow("Model:", self._model_combo)
 
         self._api_key_input = QLineEdit(self)

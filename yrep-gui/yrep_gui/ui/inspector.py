@@ -104,9 +104,9 @@ class InspectorPanel(QWidget):
         # Special handling for agent configuration fields
         if key == "model":
             combo = QComboBox(self)
-            models = ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo", "gpt-4o", "gpt-4o-mini"]
+            models = ["gpt-5", "gpt-5-pro", "gpt-4", "gpt-4-turbo", "gpt-3.5-turbo", "gpt-4o", "gpt-4o-mini"]
             combo.addItems(models)
-            current_val = str(value) if value else "gpt-4"
+            current_val = str(value) if value else "gpt-5"
             if current_val in models:
                 combo.setCurrentText(current_val)
             combo.currentTextChanged.connect(lambda val, k=key: self._on_str_changed(k, val))

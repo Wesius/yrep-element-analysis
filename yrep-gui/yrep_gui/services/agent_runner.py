@@ -66,7 +66,7 @@ class OpenAIAgent:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gpt-4",
+        model: str = "gpt-5-pro",
         temperature: float = 0.7,
         max_tokens: int = 2000,
     ):
@@ -75,8 +75,12 @@ class OpenAIAgent:
 
         self.client = OpenAI(api_key=api_key) if api_key else OpenAI()
         self.model = model
-        self.temperature = temperature
-        self.max_tokens = max_tokens
+        if not self.model in ["gpt-5-pro", "gpt-5"]:
+            # can only set temperature for non-gpt-5 models
+            self.temperature = temperature
+            self.max_tokens = max_tokens
+
+
         self.conversation_history: List[AgentMessage] = []
 
     def set_system_prompt(self, prompt: str) -> None:
@@ -114,8 +118,8 @@ class OpenAIAgent:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
+                **({"temperature": self.temperature, "max_tokens": self.max_tokens} 
+                   if self.model not in ["gpt-5-pro", "gpt-5"] else {}),
             )
 
             # Extract response
@@ -166,7 +170,7 @@ class WorkflowBuilderAgent:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gpt-4",
+        model: str = "gpt-5",
     ):
         self.agent = OpenAIAgent(api_key=api_key, model=model, temperature=0.3)
         self._setup_system_prompt()
