@@ -9,18 +9,18 @@ from typing import Any, Dict, Iterable
 RUN_WITH_LIBRARY_TEMPLATE: Dict[str, Any] = {
     "version": 1,
     "nodes": [
-        {"id": 1, "identifier": "load_signal_batch", "config": {"directory": ""}, "position": [0, 0]},
+    {"id": 1, "identifier": "load_signal_batch", "config": {"directory": "data/StandardsTest/StandardA/StandardA"}, "position": [0, 0]},
         {"id": 2, "identifier": "group_signals", "config": {"grid_points": 1000}, "position": [320, 0]},
         {"id": 3, "identifier": "select_best_group", "config": {"quality_metric": "avg_quality", "min_quality": 0.0}, "position": [640, 0]},
         {"id": 4, "identifier": "average_signals", "config": {"n_points": 1200}, "position": [960, 0]},
         {"id": 5, "identifier": "trim", "config": {"min_nm": 300.0, "max_nm": 600.0}, "position": [1280, 0]},
         {"id": 6, "identifier": "resample", "config": {"n_points": 1500, "step_nm": 0.0}, "position": [1600, 0]},
-        {"id": 7, "identifier": "load_signal_batch", "config": {"directory": ""}, "position": [960, -280]},
+    {"id": 7, "identifier": "load_signal_batch", "config": {"directory": "data/StandardsTest/StandardA/BG"}, "position": [960, -280]},
         {"id": 8, "identifier": "average_signals", "config": {"n_points": 1200}, "position": [1280, -280]},
         {"id": 9, "identifier": "subtract_background", "config": {"align": False}, "position": [1920, 0]},
         {"id": 10, "identifier": "continuum_remove_arpls", "config": {"strength": 0.5}, "position": [2240, 0]},
         {"id": 11, "identifier": "continuum_remove_rolling", "config": {"strength": 0.5}, "position": [2560, 0]},
-        {"id": 12, "identifier": "load_references", "config": {"directory": "", "element_only": False}, "position": [2880, 320]},
+    {"id": 12, "identifier": "load_references", "config": {"directory": "data/lists", "element_only": False}, "position": [2880, 320]},
         {"id": 13, "identifier": "build_templates", "config": {"fwhm_nm": 0.75, "species_filter": []}, "position": [2880, 0]},
         {"id": 14, "identifier": "shift_search", "config": {"spread_nm": 0.5, "iterations": 3}, "position": [3200, 0]},
         {"id": 15, "identifier": "detect_nnls", "config": {"presence_threshold": 0.02, "min_bands": 5}, "position": [3520, 0]},
@@ -43,7 +43,7 @@ RUN_WITH_LIBRARY_TEMPLATE: Dict[str, Any] = {
         {"source": 13, "source_port": 0, "target": 14, "target_port": 1},
         {"source": 14, "source_port": 0, "target": 15, "target_port": 0},
         {"source": 14, "source_port": 1, "target": 15, "target_port": 1},
-        {"source": 15, "source_port": 0, "target": 16, "target_port": 0},
+    {"source": 14, "source_port": 0, "target": 16, "target_port": 0},
     ],
 }
 
