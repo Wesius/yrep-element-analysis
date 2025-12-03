@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Run the composable analysis pipeline across the dirt datasets."""
+"""Run the composable analysis pipeline across the dirt datasets with various backgrounds."""
 
 from __future__ import annotations
 
 from pathlib import Path
 import numpy as np
+import dataclasses
+from typing import NamedTuple
 
 from yrep_spectrum_analysis import (
     average_signals,
@@ -24,75 +26,89 @@ from yrep_spectrum_analysis.utils import (
     group_signals,
     is_junk_group,
     load_references,
-    load_signals_from_dir,
+    load_txt_spectrum,
     signal_quality,
 )
+from yrep_spectrum_analysis.visualizations import (
+    visualize_detection,
+    visualize_preprocessing,
+    visualize_templates,
+)
+
+# Configuration
+VISUALIZE = True
+PLOT_DIR = Path(__file__).parent / "plots/dirt_comparison"
+AVERAGE_POINTS = 1200
+RESAMPLE_POINTS = 1500
+TRIM_RANGE = (300.0, 600.0)
+CONTINUUM_STRENGTH = 0.00001
+SHIFT_PARAMS = {"spread_nm": 0.5, "iterations": 3}
+DETECT_PARAMS = {"presence_threshold": 0.00002, "min_bands": 3}
+INITIAL_FWHM = 0.75
+FWHM_SEARCH = {"enabled": True, "spread_nm": 0.2, "iterations": 3}
+
+# Elements commonly found in soil/dirt
+DIRT_ELEMENTS = [
+    "Al", "Si", "Fe", "Ca", "Mg", "K", "Na", "Ti", "Mn", "P", "S", "Zn", "Cu",
+    "Cr", "Ni", "Pb", "Ba", "Sr", "V", "Co", "Mo", "As", "Li", "Cd"
+]
+
+class ResultSummary(NamedTuple):
+    dataset_name: str
+    run_name: str
+    bg_name: str
+    r2: float
+    detections: list[str]
+    best_fwhm: float | None
 
 
-def load_spectra_from_dir(root: Path) -> list[Signal]:
-    signals = load_signals_from_dir(root)
-    filtered: list[Signal] = []
-    for sig in signals:
-        name_l = str(sig.meta.get("file", "")).lower()
-        if any(tag in name_l for tag in ("average", "avg_")):
+def load_recursive(root: Path) -> list[Signal]:
+    """recursively load all .txt spectra in a directory."""
+    signals: list[Signal] = []
+    if not root.exists():
+        return signals
+    
+    # Filter out average files if present
+    for fp in sorted(root.rglob("*.txt")):
+        if any(tag in fp.name.lower() for tag in ("average", "avg_")):
             continue
-        filtered.append(sig)
-    return filtered
+        try:
+            wl, iy = load_txt_spectrum(fp)
+            signals.append(Signal(wavelength=wl, intensity=iy, meta={"file": fp.name}))
+        except ValueError:
+            continue
+    return signals
 
 
-def prepare_datasets(base: Path) -> list[tuple[str, list[Signal], list[Signal]]]:
-    datasets: list[tuple[str, list[Signal], list[Signal]]] = []
-    dirt_root = base / "data" / "dirt"
-    legacy_dir = dirt_root / "dirt"
-    if legacy_dir.exists():
-        meas = load_spectra_from_dir(legacy_dir)
-        if meas:
-            datasets.append(("legacy_dirt", meas, []))
-
-    data_27_dir = dirt_root / "Data_27_Dec"
-    if data_27_dir.exists():
-        bg_root = data_27_dir / "BG"
-        bg_all = load_spectra_from_dir(bg_root) if bg_root.exists() else []
-        bg_na = load_spectra_from_dir(bg_root / "BGNA") if bg_root.exists() else []
-        bg_palet = load_spectra_from_dir(bg_root / "BGPalet") if bg_root.exists() else []
-
-        if bg_all:
-            datasets.append(("Data_27_Dec/BG", bg_all, []))
-
-        dirt_dir = data_27_dir / "DIRT"
-        meas_dirt = load_spectra_from_dir(dirt_dir)
-        if meas_dirt:
-            bg_for_dirt = bg_na or bg_all
-            datasets.append(("Data_27_Dec/DIRT", meas_dirt, bg_for_dirt))
-
-        kbr_dir = data_27_dir / "KBr"
-        meas_kbr = load_spectra_from_dir(kbr_dir)
-        if meas_kbr:
-            bg_for_kbr = bg_palet or bg_all
-            datasets.append(("Data_27_Dec/KBr", meas_kbr, bg_for_kbr))
-
-    return datasets
+def load_runs(root: Path) -> dict[str, list[Signal]]:
+    """
+    Load spectra grouped by subdirectories (Runs).
+    Returns dict like: {"Run1": [sig, sig...], "Run2": [sig, sig...]}
+    """
+    runs: dict[str, list[Signal]] = {}
+    if not root.exists():
+        return runs
+        
+    # List only directories
+    for path in sorted(root.iterdir()):
+        if path.is_dir():
+            # Load signals in this run directory (non-recursive to keep runs separate? 
+            # actually, runs might have subfolders? simpler to use recursive per run folder)
+            signals = load_recursive(path)
+            if signals:
+                runs[path.name] = signals
+    return runs
 
 
-def describe_group(group: list[Signal]) -> tuple[bool, float, float]:
+def describe_group(group: list[Signal]) -> tuple[bool, float]:
+    """Return junk status and quality."""
     junk = is_junk_group(group)
-    q_specs = [signal_quality(sig) for sig in group]
     try:
         avg = average_signals(group, n_points=1200)
         q_avg = signal_quality(avg)
     except Exception:
         q_avg = 0.0
-    return junk, float(np.mean(q_specs)), q_avg
-
-
-AVERAGE_POINTS = 1200
-RESAMPLE_POINTS = 1500
-TRIM_RANGE = (300.0, 600.0)
-CONTINUUM_STRENGTH = 0.5
-SHIFT_PARAMS = {"spread_nm": 0.5, "iterations": 3}
-DETECT_PARAMS = {"presence_threshold": 0.02, "min_bands": 5}
-INITIAL_FWHM = 0.75
-FWHM_SEARCH = {"enabled": True, "spread_nm": 0.2, "iterations": 3}
+    return junk, q_avg
 
 
 def run_pipeline(
@@ -100,104 +116,229 @@ def run_pipeline(
     backgrounds: list[Signal],
     references,
     species_filter: list[str] | None,
-):
+    plot_path_prefix: Path | None = None,
+) -> tuple[any, any, float]:
+    """Run the pipeline on a group of measurements + background."""
+    
+    # 1. Preprocessing
     signal = average_signals(measurements, n_points=AVERAGE_POINTS)
-    background_signal = (
-        average_signals(backgrounds, n_points=AVERAGE_POINTS)
-        if backgrounds
-        else None
-    )
+    
+    background_signal = None
+    if backgrounds:
+        background_signal = average_signals(backgrounds, n_points=AVERAGE_POINTS)
+        
     processed = trim(signal, min_nm=TRIM_RANGE[0], max_nm=TRIM_RANGE[1])
     processed = resample(processed, n_points=RESAMPLE_POINTS)
-    if background_signal is not None:
+    
+    if background_signal:
         processed = subtract_background(processed, background_signal, align=False)
-    processed = continuum_remove_arpls(processed, strength=CONTINUUM_STRENGTH)
-    processed = continuum_remove_rolling(processed, strength=CONTINUUM_STRENGTH)
+        
+    # Capture state for visualization
+    subtracted = processed
+    
+    # Continuum Removal
+    # Create copies or temporary signals to capture baselines
+    # Note: arpls returns the CORRECTED signal, not the baseline. 
+    # We need to calculate baseline = original - corrected
+    
+    arpls_corrected = continuum_remove_arpls(processed, strength=CONTINUUM_STRENGTH)
+    arpls_baseline_intensity = processed.intensity - arpls_corrected.intensity
+    arpls_baseline = Signal(wavelength=processed.wavelength, intensity=arpls_baseline_intensity, meta={})
+    
+    rolling_corrected = continuum_remove_rolling(arpls_corrected, strength=CONTINUUM_STRENGTH)
+    rolling_baseline_intensity = arpls_corrected.intensity - rolling_corrected.intensity
+    rolling_baseline = Signal(wavelength=processed.wavelength, intensity=rolling_baseline_intensity, meta={})
+    
+    processed = rolling_corrected # Final result
+    
+    if VISUALIZE and plot_path_prefix:
+        visualize_preprocessing(
+            original=signal, # Use the averaged original signal
+            background=background_signal,
+            subtracted=subtracted,
+            arpls_baseline=arpls_baseline,
+            rolling_baseline=rolling_baseline,
+            final=processed,
+            title="Preprocessing Steps",
+            save_path=str(plot_path_prefix) + "_preprocessing.png",
+            show=False,
+        )
+
+    # 2. Template Matching
     templates = build_templates(
         processed,
         references=references,
         fwhm_nm=INITIAL_FWHM,
         species_filter=species_filter,
     )
-    if FWHM_SEARCH["enabled"] and FWHM_SEARCH["iterations"] > 0 and FWHM_SEARCH["spread_nm"] > 0:
-        templates = fwhm_search(
-            processed,
-            references,
-            initial_fwhm_nm=INITIAL_FWHM,
-            spread_nm=FWHM_SEARCH["spread_nm"],
-            iterations=FWHM_SEARCH["iterations"],
-            species_filter=species_filter,
+    templates = fwhm_search(
+        processed,
+        references,
+        initial_fwhm_nm=INITIAL_FWHM,
+        spread_nm=FWHM_SEARCH["spread_nm"],
+        iterations=FWHM_SEARCH["iterations"],
+        species_filter=species_filter,
+    )
+    
+    if VISUALIZE and plot_path_prefix:
+        visualize_templates(
+            signal=processed,
+            templates=templates,
+            title="Optimized Templates",
+            save_path=str(plot_path_prefix) + "_templates.png",
+            show=False,
         )
-    if SHIFT_PARAMS["spread_nm"] > 0 and SHIFT_PARAMS["iterations"] > 0:
-        processed = shift_search(
-            processed,
-            templates,
-            spread_nm=SHIFT_PARAMS["spread_nm"],
-            iterations=SHIFT_PARAMS["iterations"],
-        )
+
+    # 3. Detection
+    processed = shift_search(
+        processed,
+        templates,
+        spread_nm=SHIFT_PARAMS["spread_nm"],
+        iterations=SHIFT_PARAMS["iterations"],
+    )
     result = detect_nnls(
         processed,
         templates,
         presence_threshold=DETECT_PARAMS["presence_threshold"],
         min_bands=DETECT_PARAMS["min_bands"],
     )
-    return result, templates
+    
+    if VISUALIZE and plot_path_prefix:
+        visualize_detection(
+            result=result,
+            templates=templates,
+            title="Detection Results",
+            save_path=str(plot_path_prefix) + "_detection.png",
+            show=False,
+        )
+        
+    r2 = result.meta.get("fit_R2", 0.0)
+    return result, templates, r2
 
 
 def main() -> None:
     base = Path(__file__).resolve().parent
+    data_27 = base / "data" / "dirt" / "Data_27_Dec"
     lists_dir = base / "data" / "lists"
+    
+    # Load References
+    print("Loading references...")
     references = load_references(lists_dir, element_only=False)
-
-    species_filter = expand_species_filter(references.lines.keys(), [
-        "Na", "K", "Ca", "Li", "Cu", "Ba", "Sr", "Hg", "O", "N", "Al",
-        "Mg", "Si", "Zn", "Pb", "Cd", "Ag", "Au", "Cr", "Mn", "Co", "Ni",
-        "Ti", "Sn", "Sb", "As", "Se", "C", "B", "Fe", "H", "Ar",
-    ])
-
-    datasets = prepare_datasets(base)
-    if not datasets:
-        raise RuntimeError("No dirt datasets detected.")
-
-    for label, measurements, backgrounds in datasets:
-        print(f"\nProcessing {label}…")
-        if not measurements:
-            print("   No spectra found; skipping.")
+    species_filter = expand_species_filter(references.lines.keys(), DIRT_ELEMENTS)
+    
+    # Load Datasets (Grouped by Runs)
+    print("Loading datasets...")
+    # Dictionaries mapping DatasetName -> {RunName -> [Signals]}
+    datasets_with_runs = {
+        "Mix_NoHeat": load_runs(data_27 / "MIX" / "MIXNOHEAT"),
+    }
+    
+    # Backgrounds (Aggregated)
+    backgrounds = {
+        "BGNA": load_recursive(data_27 / "BG" / "BGNA"),
+        "BGPalet": load_recursive(data_27 / "BG" / "BGPalet"),
+        "KBrHeat": load_recursive(data_27 / "KBr" / "KBrHeat"),
+        "KBrNoHeat": load_recursive(data_27 / "KBr" / "KBrNoHeat"),
+    }
+    
+    if VISUALIZE:
+        PLOT_DIR.mkdir(parents=True, exist_ok=True)
+        
+    results: list[ResultSummary] = []
+    
+    # Iterate Datasets
+    for ds_name, runs_dict in datasets_with_runs.items():
+        if not runs_dict:
+            print(f"Warning: No runs found for {ds_name}")
             continue
-        if backgrounds:
-            print(f"   Loaded {len(measurements)} measurements and {len(backgrounds)} backgrounds")
-        else:
-            print(f"   Loaded {len(measurements)} measurements; no backgrounds provided")
-
-        groups = group_signals(measurements)
-        print(f"   Split into {len(groups)} group(s)")
-
-        for gi, group in enumerate(groups, start=1):
-            junk, q_mean, q_avg = describe_group(group)
-            print(f"   Group {gi}: junk={junk}; quality_mean={q_mean:.3f}; quality_avg={q_avg:.3f}")
+            
+        print(f"\nAnalyzing {ds_name}...")
+        
+        # Iterate Runs
+        for run_name, group_signals_list in runs_dict.items():
+            # Filter junk
+            junk, q_avg = describe_group(group_signals_list)
             if junk:
-                print("      Skipping analysis (identified as junk)")
+                print(f"  {run_name} is junk (quality={q_avg:.3f}), skipping.")
                 continue
+                
+            print(f"  Processing {run_name}...")
+            
+            # Iterate Backgrounds
+            for bg_name, bg_files in backgrounds.items():
+                if not bg_files:
+                    continue
 
-            detection, templates = run_pipeline(group, backgrounds, references, species_filter)
+                plot_prefix = None
+                if VISUALIZE:
+                    # Structure: plots/dirt_comparison/Mix_Heat_Run1_BGNA
+                    plot_prefix = PLOT_DIR / f"{ds_name}_{run_name}_{bg_name}"
 
-            r2 = detection.meta.get("fit_R2", 0.0)
-            print(f"      R²={r2:.4f}; detections={len(detection.detections)}")
-            best_fwhm = templates.meta.get("fwhm_search", {}).get("best_fwhm_nm")
-            if best_fwhm is not None:
-                print(f"        Best FWHM ≈ {float(best_fwhm):.3f} nm")
-            if detection.detections:
-                for det in detection.detections:
-                    coeff = det.meta.get("coeff")
-                    bands_hit = det.meta.get("bands_hit")
-                    print(
-                        f"        - {det.species}: score={det.score:.4f}"
-                        + (f", coeff={coeff:.4f}" if coeff is not None else "")
-                        + (f", bands={bands_hit}" if bands_hit is not None else "")
+                try:
+                    detection, templates, r2 = run_pipeline(
+                        group_signals_list, bg_files, references, species_filter, plot_path_prefix=plot_prefix
                     )
-            else:
-                print("        No detections above threshold")
+                    
+                    best_fwhm = templates.meta.get("fwhm_search", {}).get("best_fwhm_nm")
+                    det_species = [d.species for d in detection.detections]
+                    
+                    res = ResultSummary(
+                        dataset_name=ds_name,
+                        run_name=run_name,
+                        bg_name=bg_name,
+                        r2=r2,
+                        detections=det_species,
+                        best_fwhm=best_fwhm
+                    )
+                    results.append(res)
+                    # print(f"    [{bg_name}] R²={r2:.4f}")
+                    
+                except Exception as e:
+                    print(f"    Error processing {ds_name} {run_name} + {bg_name}: {e}")
 
+    # Summary
+    print("\n" + "="*80)
+    print("SUMMARY OF RESULTS")
+    print("="*80)
+    print(f"{'Dataset':<15} | {'Run':<10} | {'Background':<12} | {'R²':<8} | {'Detections'}")
+    print("-" * 80)
+    
+    # Sort by R2 descending
+    results.sort(key=lambda x: x.r2, reverse=True)
+    
+    for res in results:
+        det_str = ", ".join(res.detections[:3]) + ("..." if len(res.detections) > 3 else "")
+        print(f"{res.dataset_name:<15} | {res.run_name:<10} | {res.bg_name:<12} | {res.r2:.4f}   | {det_str}")
+        
+    if results:
+        best = results[0]
+        print("\n" + "="*80)
+        print(f"BEST CONFIGURATION: {best.dataset_name} {best.run_name} + {best.bg_name} (R²={best.r2:.4f})")
+        print("="*80)
+
+        # Re-run the best configuration to visualize/plot if needed
+        print("\nRe-running best configuration to generate specific plot...")
+        
+        # Find the signals for the best run
+        best_run_signals = None
+        if best.dataset_name in datasets_with_runs:
+             best_run_signals = datasets_with_runs[best.dataset_name].get(best.run_name)
+
+        # Find the background signals
+        best_bg_signals = backgrounds.get(best.bg_name)
+
+        if best_run_signals and best_bg_signals:
+            plot_prefix = PLOT_DIR / f"BEST_{best.dataset_name}_{best.run_name}_{best.bg_name}"
+            run_pipeline(
+                best_run_signals, 
+                best_bg_signals, 
+                references, 
+                species_filter, 
+                plot_path_prefix=plot_prefix
+            )
+            print(f"Best run plots saved to {plot_prefix}_*.png")
+        else:
+            print("Could not reload data for best run to plot.")
 
 if __name__ == "__main__":
     main()
