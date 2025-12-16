@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-import numpy as np
-import dataclasses
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from yrep_spectrum_analysis import (
     average_signals,
@@ -23,7 +21,6 @@ from yrep_spectrum_analysis import (
 from yrep_spectrum_analysis.types import Signal
 from yrep_spectrum_analysis.utils import (
     expand_species_filter,
-    group_signals,
     is_junk_group,
     load_references,
     load_txt_spectrum,
@@ -117,7 +114,7 @@ def run_pipeline(
     references,
     species_filter: list[str] | None,
     plot_path_prefix: Path | None = None,
-) -> tuple[any, any, float]:
+) -> tuple[Any, Any, float]:
     """Run the pipeline on a group of measurements + background."""
     
     # 1. Preprocessing
@@ -176,7 +173,7 @@ def run_pipeline(
         references,
         initial_fwhm_nm=INITIAL_FWHM,
         spread_nm=FWHM_SEARCH["spread_nm"],
-        iterations=FWHM_SEARCH["iterations"],
+        iterations=int(FWHM_SEARCH["iterations"]),
         species_filter=species_filter,
     )
     
@@ -194,13 +191,13 @@ def run_pipeline(
         processed,
         templates,
         spread_nm=SHIFT_PARAMS["spread_nm"],
-        iterations=SHIFT_PARAMS["iterations"],
+        iterations=int(SHIFT_PARAMS["iterations"]),
     )
     result = detect_nnls(
         processed,
         templates,
         presence_threshold=DETECT_PARAMS["presence_threshold"],
-        min_bands=DETECT_PARAMS["min_bands"],
+        min_bands=int(DETECT_PARAMS["min_bands"]),
     )
     
     if VISUALIZE and plot_path_prefix:

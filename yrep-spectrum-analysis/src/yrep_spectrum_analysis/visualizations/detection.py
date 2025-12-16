@@ -80,7 +80,8 @@ def visualize_detection(
             ax_main.plot(wl, y_fit, "r--", label="Total Fit", linewidth=1.5, alpha=0.9)
         
         # Plot top individual components
-        colors = plt.cm.tab10(np.linspace(0, 1, top_n_components))
+        cmap = plt.colormaps.get_cmap("tab10")
+        colors = cmap(np.linspace(0, 1, top_n_components))
         for idx, (species, comp, coeff) in enumerate(components[:top_n_components]):
             ax_main.plot(
                 wl, 

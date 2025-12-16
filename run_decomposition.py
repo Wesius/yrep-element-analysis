@@ -9,23 +9,18 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from yrep_spectrum_analysis import (
-    average_signals,
     resample,
     trim,
     analyze_pca,
     analyze_ica,
     analyze_mcr,
     identify_components,
-    subtract_background,
     continuum_remove_arpls,
     continuum_remove_rolling,
 )
 from yrep_spectrum_analysis.types import Signal
 from yrep_spectrum_analysis.utils import (
-    group_signals,
-    is_junk_group,
     load_signals_from_dir,
-    signal_quality,
     load_references,
 )
 

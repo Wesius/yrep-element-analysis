@@ -4,13 +4,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Tuple
-import numpy as np
-import matplotlib.pyplot as plt
 
 from yrep_spectrum_analysis import (
     average_signals,
-    build_templates,
     fwhm_search,
     continuum_remove_arpls,
     continuum_remove_rolling,
@@ -74,7 +70,7 @@ def run_nnls_analysis(
     result = detect_nnls(
         processed, templates,
         presence_threshold=DETECT_PARAMS["presence_threshold"],
-        min_bands=DETECT_PARAMS["min_bands"],
+        min_bands=int(DETECT_PARAMS["min_bands"]),
     )
     
     return {
@@ -116,14 +112,14 @@ def run_decomposition_analysis(
         ica_sources = analyze_ica(processed_list, n_components=min(5, len(processed_list) - 1))
         ica_comps = ica_sources.T
         ica_ids = identify_components(ica_comps, wavelength, references, top_n=3)
-    except Exception as e:
+    except Exception:
         ica_comps, ica_ids = None, None
     
     # MCR-ALS
     try:
         mcr_conc, mcr_spectra = analyze_mcr(processed_list, n_components=min(4, len(processed_list) - 1))
         mcr_ids = identify_components(mcr_spectra, wavelength, references, top_n=3)
-    except Exception as e:
+    except Exception:
         mcr_spectra, mcr_ids = None, None
     
     return {
@@ -226,13 +222,13 @@ def print_comparison(nnls_result: dict, decomp_result: dict) -> None:
         print(f"    PC{i+1}: {match_str}")
     
     if decomp_result["ica"]:
-        print(f"\n  ICA Top Components:")
+        print("\n  ICA Top Components:")
         for i, matches in enumerate(decomp_result["ica"]["ids"][:3]):
             match_str = ", ".join([f"{sp}({sc:.2f})" for sp, sc in matches[:2]])
             print(f"    IC{i+1}: {match_str}")
     
     if decomp_result["mcr"]:
-        print(f"\n  MCR-ALS Components:")
+        print("\n  MCR-ALS Components:")
         for i, matches in enumerate(decomp_result["mcr"]["ids"]):
             match_str = ", ".join([f"{sp}({sc:.2f})" for sp, sc in matches[:2]])
             print(f"    MCR{i+1}: {match_str}")

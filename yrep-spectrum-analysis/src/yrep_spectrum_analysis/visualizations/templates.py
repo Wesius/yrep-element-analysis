@@ -44,7 +44,8 @@ def visualize_templates(
     limit = min(n_species, max_species)
     
     # Create a color cycle
-    colors = plt.cm.tab10(np.linspace(0, 1, limit))
+    cmap = plt.colormaps.get_cmap("tab10")
+    colors = cmap(np.linspace(0, 1, limit))
 
     for i in range(limit):
         species_name = templates.species[i]

@@ -53,6 +53,7 @@ TRIM_RANGE = (300.0, 600.0)
 CONTINUUM_STRENGTH = 0.0
 TEMPLATE_FWHM = 0.75
 SHIFT_PARAMS = {"spread_nm": 0.5, "iterations": 2}
+FWHM_SEARCH = {"spread_nm": 0.2, "iterations": 3}
 DETECT_PARAMS = {"presence_threshold": 0.0, "min_bands": 5}
 SPECIES_FILTER = [
     "CU", "ZN", "C", "FE", "NI", "PB", "SN", "SI", "AL", "MG",
@@ -845,7 +846,7 @@ def run_pipeline_for_group(
             references,
             initial_fwhm_nm=TEMPLATE_FWHM,
             spread_nm=FWHM_SEARCH["spread_nm"],
-            iterations=FWHM_SEARCH["iterations"],
+            iterations=int(FWHM_SEARCH["iterations"]),
             species_filter=species_filter,
         )
 
@@ -854,7 +855,7 @@ def run_pipeline_for_group(
             processed,
             templates,
             spread_nm=SHIFT_PARAMS["spread_nm"],
-            iterations=SHIFT_PARAMS["iterations"],
+            iterations=int(SHIFT_PARAMS["iterations"]),
         )
         if capture_history:
             history.append(("shift", processed))
@@ -863,7 +864,7 @@ def run_pipeline_for_group(
         processed,
         templates,
         presence_threshold=DETECT_PARAMS["presence_threshold"],
-        min_bands=DETECT_PARAMS["min_bands"],
+        min_bands=int(DETECT_PARAMS["min_bands"]),
     )
 
     if capture_history:

@@ -8,8 +8,8 @@ from sklearn.preprocessing import StandardScaler
 from pymcr.mcr import McrAR
 from pymcr.constraints import ConstraintNonneg, ConstraintNorm
 
-from .stages import _quick_fit_r2, build_templates
-from ..types import Signal, References, Templates
+from .stages import build_templates
+from ..types import Signal, References
 
 def identify_components(
     components: np.ndarray, 
@@ -170,10 +170,14 @@ def analyze_mcr(signals: Sequence[Signal], n_components: int = 4) -> Tuple[np.nd
         st_regr="nnls", # Solver for Spectra (Non-Negative Least Squares)
         c_constraints=[ConstraintNonneg()],
         st_constraints=[ConstraintNonneg(), ConstraintNorm()],
-        tol_increase=10.0, # Allow larger error increases to escape local minima
-        max_iter=100,
+        tol_increase=100.0, # Allow larger error increases to escape local minima
+        max_iter=300,
     )
     
     mcr.fit(X, ST=initial_spectra)
     
-    return mcr.C_opt_, mcr.ST_opt_
+    if mcr.C_opt_ is None or mcr.ST_opt_ is None:
+        raise RuntimeError("MCR-ALS fit failed to produce optimized components")
+    c_opt: np.ndarray = mcr.C_opt_  # type: ignore[assignment]
+    st_opt: np.ndarray = mcr.ST_opt_  # type: ignore[assignment]
+    return c_opt, st_opt

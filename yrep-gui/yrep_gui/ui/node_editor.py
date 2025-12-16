@@ -20,7 +20,7 @@ from yrep_gui.nodes.registry import NodeDefinition
 from yrep_gui.ui.node_item import NodeConnection, NodeItem, NodePort
 
 if TYPE_CHECKING:  # pragma: no cover - hinting only
-    from PyQt6.QtGui import QKeyEvent, QMouseEvent
+    from PyQt6.QtGui import QKeyEvent, QDragEnterEvent, QDragMoveEvent, QDropEvent
 
 GRID_SIZE = 25
 FINE_GRID_COLOR = QColor(60, 60, 60)
@@ -43,7 +43,7 @@ class NodeScene(QGraphicsScene):
     def editor(self) -> "NodeEditor":
         return self._editor
 
-    def drawBackground(self, painter: QPainter, rect: QRectF) -> None:  # noqa: N802
+    def drawBackground(self, painter: QPainter, rect: QRectF) -> None:  # type: ignore[override]  # noqa: N802
         painter.fillRect(rect, BACKGROUND_COLOR)
 
         left = int(rect.left()) - (int(rect.left()) % GRID_SIZE)
@@ -70,18 +70,18 @@ class NodeScene(QGraphicsScene):
         _draw_lines(painter, lines_coarse)
 
     # Event surfaces -----------------------------------------------------
-    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # pragma: no cover - UI only
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # type: ignore[override]  # pragma: no cover
         if self._editor.update_drag_edge(event.scenePos()):
             event.accept()
         super().mouseMoveEvent(event)
 
-    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # pragma: no cover - UI only
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # type: ignore[override]  # pragma: no cover
         if event.button() == Qt.MouseButton.LeftButton and self._editor.finish_connection(event.scenePos()):
             event.accept()
             return
         super().mouseReleaseEvent(event)
 
-    def keyPressEvent(self, event: "QKeyEvent") -> None:  # pragma: no cover - UI only
+    def keyPressEvent(self, event: "QKeyEvent") -> None:  # type: ignore[override]  # pragma: no cover
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self._editor.delete_selection()
             event.accept()
@@ -112,14 +112,16 @@ class NodeView(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setAcceptDrops(True)
-        self.viewport().setAcceptDrops(True)
+        vp = self.viewport()
+        if vp:
+            vp.setAcceptDrops(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self._panning = False
         self._pan_start = QPointF()
         self._space_pan_shortcut = False
 
-    def wheelEvent(self, event):  # noqa: ANN001 - UI callback
+    def wheelEvent(self, event):  # type: ignore[override]  # noqa: ANN001
         # Zoom with mouse wheel, with limits to prevent extreme zoom
         zoom_in_factor = 1.15
         zoom_out_factor = 1 / zoom_in_factor
@@ -139,7 +141,7 @@ class NodeView(QGraphicsView):
 
         event.accept()
 
-    def mousePressEvent(self, event):  # noqa: ANN001 - UI callback
+    def mousePressEvent(self, event):  # type: ignore[override]  # noqa: ANN001
         if event.button() == Qt.MouseButton.MiddleButton or (
             event.button() == Qt.MouseButton.LeftButton and self._space_pan_shortcut
         ):
@@ -150,20 +152,21 @@ class NodeView(QGraphicsView):
             return
         super().mousePressEvent(event)
 
-    def mouseMoveEvent(self, event):  # noqa: ANN001 - UI callback
+    def mouseMoveEvent(self, event):  # type: ignore[override]  # noqa: ANN001
         if self._panning:
             delta = event.position() - self._pan_start
             self._pan_start = event.position()
             # Smooth panning using scrollbars
             hbar = self.horizontalScrollBar()
             vbar = self.verticalScrollBar()
-            hbar.setValue(int(hbar.value() - delta.x()))
-            vbar.setValue(int(vbar.value() - delta.y()))
+            if hbar and vbar:
+                hbar.setValue(int(hbar.value() - delta.x()))
+                vbar.setValue(int(vbar.value() - delta.y()))
             event.accept()
             return
         super().mouseMoveEvent(event)
 
-    def mouseReleaseEvent(self, event):  # noqa: ANN001 - UI callback
+    def mouseReleaseEvent(self, event):  # type: ignore[override]  # noqa: ANN001
         if self._panning and event.button() in {
             Qt.MouseButton.MiddleButton,
             Qt.MouseButton.LeftButton,
@@ -174,7 +177,9 @@ class NodeView(QGraphicsView):
             return
         super().mouseReleaseEvent(event)
 
-    def keyPressEvent(self, event):  # noqa: ANN001 - UI callback
+    def keyPressEvent(self, event: "QKeyEvent | None") -> None:  # type: ignore[override]
+        if event is None:
+            return
         if event.key() == Qt.Key.Key_Space:
             if not self._space_pan_shortcut and not self._panning:
                 self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -184,20 +189,22 @@ class NodeView(QGraphicsView):
 
         # Arrow key navigation
         pan_amount = 50
-        if event.key() == Qt.Key.Key_Left:
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - pan_amount)
+        h_bar = self.horizontalScrollBar()
+        v_bar = self.verticalScrollBar()
+        if event.key() == Qt.Key.Key_Left and h_bar:
+            h_bar.setValue(h_bar.value() - pan_amount)
             event.accept()
             return
-        if event.key() == Qt.Key.Key_Right:
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + pan_amount)
+        if event.key() == Qt.Key.Key_Right and h_bar:
+            h_bar.setValue(h_bar.value() + pan_amount)
             event.accept()
             return
-        if event.key() == Qt.Key.Key_Up:
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - pan_amount)
+        if event.key() == Qt.Key.Key_Up and v_bar:
+            v_bar.setValue(v_bar.value() - pan_amount)
             event.accept()
             return
-        if event.key() == Qt.Key.Key_Down:
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() + pan_amount)
+        if event.key() == Qt.Key.Key_Down and v_bar:
+            v_bar.setValue(v_bar.value() + pan_amount)
             event.accept()
             return
 
@@ -215,7 +222,9 @@ class NodeView(QGraphicsView):
 
         super().keyPressEvent(event)
 
-    def keyReleaseEvent(self, event):  # noqa: ANN001 - UI callback
+    def keyReleaseEvent(self, event: "QKeyEvent | None") -> None:  # type: ignore[override]
+        if event is None:
+            return
         if event.key() == Qt.Key.Key_Space:
             self._space_pan_shortcut = False
             if not self._panning:
@@ -224,24 +233,35 @@ class NodeView(QGraphicsView):
             return
         super().keyReleaseEvent(event)
 
-    def dragEnterEvent(self, event):  # noqa: ANN001 - UI callback
-        if event.mimeData().hasFormat(NODE_MIME_TYPE):
+    def dragEnterEvent(self, event: "QDragEnterEvent | None") -> None:  # type: ignore[override]
+        if event is None:
+            return
+        mime = event.mimeData()
+        if mime and mime.hasFormat(NODE_MIME_TYPE):
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
 
-    def dragMoveEvent(self, event):  # noqa: ANN001 - UI callback
-        if event.mimeData().hasFormat(NODE_MIME_TYPE):
+    def dragMoveEvent(self, event: "QDragMoveEvent | None") -> None:  # type: ignore[override]
+        if event is None:
+            return
+        mime = event.mimeData()
+        if mime and mime.hasFormat(NODE_MIME_TYPE):
             event.acceptProposedAction()
             return
         super().dragMoveEvent(event)
 
-    def dropEvent(self, event):  # noqa: ANN001 - UI callback
-        if event.mimeData().hasFormat(NODE_MIME_TYPE):
-            identifier = bytes(event.mimeData().data(NODE_MIME_TYPE)).decode("utf-8").strip()
+    def dropEvent(self, event: "QDropEvent | None") -> None:  # type: ignore[override]
+        if event is None:
+            return
+        mime = event.mimeData()
+        if mime and mime.hasFormat(NODE_MIME_TYPE):
+            identifier = mime.data(NODE_MIME_TYPE).data().decode("utf-8").strip()
             if identifier:
                 scene_pos = self.mapToScene(event.position().toPoint())
-                self.scene().editor.add_node_by_identifier(identifier, scene_pos)
+                scene = self.scene()
+                if scene and hasattr(scene, 'editor'):
+                    scene.editor.add_node_by_identifier(identifier, scene_pos)  # type: ignore[attr-defined]
                 event.acceptProposedAction()
                 return
         super().dropEvent(event)
@@ -249,7 +269,10 @@ class NodeView(QGraphicsView):
     # View navigation helpers ---------------------------------------------
     def fit_all_nodes(self) -> None:
         """Zoom and pan to fit all nodes in the viewport."""
-        items = [item for item in self.scene().items() if hasattr(item, "definition")]
+        scene = self.scene()
+        if not scene:
+            return
+        items = [item for item in scene.items() if hasattr(item, "definition")]
         if not items:
             # No nodes, center on origin
             self.centerOn(0, 0)
@@ -282,7 +305,10 @@ class NodeView(QGraphicsView):
 
     def reset_zoom(self) -> None:
         """Reset zoom to 100% (1:1 scale)."""
-        center = self.mapToScene(self.viewport().rect().center())
+        vp = self.viewport()
+        if not vp:
+            return
+        center = self.mapToScene(vp.rect().center())
         self.resetTransform()
         self.centerOn(center)
 
@@ -515,7 +541,10 @@ class NodeEditor(QWidget):
         self.update_edges_for(target)
 
     def _default_spawn_position(self) -> QPointF:
-        viewport_rect = self._view.viewport().rect()
+        vp = self._view.viewport()
+        if not vp:
+            return QPointF(0, 0)
+        viewport_rect = vp.rect()
         center = self._view.mapToScene(viewport_rect.center())
         return QPointF(center)
 

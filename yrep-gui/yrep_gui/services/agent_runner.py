@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:
-    from openai import OpenAI
+    from openai import OpenAI  # type: ignore[import-unresolved]
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
 
 try:
-    from dotenv import load_dotenv
+    from dotenv import load_dotenv  # type: ignore[import-unresolved]
     DOTENV_AVAILABLE = True
 except ImportError:
     DOTENV_AVAILABLE = False
@@ -75,7 +74,7 @@ class OpenAIAgent:
 
         self.client = OpenAI(api_key=api_key) if api_key else OpenAI()
         self.model = model
-        if not self.model in ["gpt-5-pro", "gpt-5"]:
+        if self.model not in ["gpt-5-pro", "gpt-5"]:
             # can only set temperature for non-gpt-5 models
             self.temperature = temperature
             self.max_tokens = max_tokens

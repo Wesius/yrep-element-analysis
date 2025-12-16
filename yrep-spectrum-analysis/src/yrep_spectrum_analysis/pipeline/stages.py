@@ -231,7 +231,6 @@ def shift_search(
         step_factor = 1.0 / float(2 ** i)
         shift, shifted = _search_best_shift(wl, current_y, S, spread_nm=spread_nm, step_factor=step_factor)
         if shift != 0:
-            best_y = shifted
             best_signal = Signal(wavelength=wl.copy(), intensity=shifted, meta=dict(signal.meta))
             best_signal.meta.setdefault("alignment", {}).setdefault("shifts_nm", []).append(shift)
         current_y = shifted

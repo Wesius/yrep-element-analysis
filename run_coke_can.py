@@ -190,7 +190,7 @@ def run_pipeline(
             references,
             initial_fwhm_nm=INITIAL_FWHM,
             spread_nm=FWHM_SEARCH["spread_nm"],
-            iterations=FWHM_SEARCH["iterations"],
+            iterations=int(FWHM_SEARCH["iterations"]),
             species_filter=species_filter,
         )
 
@@ -207,14 +207,14 @@ def run_pipeline(
         processed,
         templates,
         spread_nm=SHIFT_PARAMS["spread_nm"],
-        iterations=SHIFT_PARAMS["iterations"],
+        iterations=int(SHIFT_PARAMS["iterations"]),
     )
 
     result = detect_nnls(
         processed,
         templates,
         presence_threshold=DETECT_PARAMS["presence_threshold"],
-        min_bands=DETECT_PARAMS["min_bands"],
+        min_bands=int(DETECT_PARAMS["min_bands"]),
     )
 
     if VISUALIZE and plot_path_prefix:

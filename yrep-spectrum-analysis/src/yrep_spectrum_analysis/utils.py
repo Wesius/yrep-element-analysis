@@ -119,14 +119,15 @@ def load_references(lists_dir: Path, *, element_only: bool = True) -> References
             }
         ).dropna()
         for sp, group in frame.groupby("species"):
+            species_key = str(sp)
             wl_vals = group["wavelength_nm"].to_numpy(dtype=float)
             int_vals = group["intensity"].to_numpy(dtype=float)
-            if sp in lines:
-                wl_prev, int_prev = lines[sp]
+            if species_key in lines:
+                wl_prev, int_prev = lines[species_key]
                 wl_vals = np.concatenate([wl_prev, wl_vals])
                 int_vals = np.concatenate([int_prev, int_vals])
             sorter = np.argsort(wl_vals)
-            lines[sp] = (wl_vals[sorter], int_vals[sorter])
+            lines[species_key] = (wl_vals[sorter], int_vals[sorter])
     if not lines:
         raise RuntimeError("No reference lines parsed")
     return References(lines=lines, meta={"element_only": element_only})

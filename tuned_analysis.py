@@ -5,12 +5,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from typing import Tuple
 import numpy as np
 
 from yrep_spectrum_analysis import (
     average_signals,
-    build_templates,
     fwhm_search,
     continuum_remove_arpls,
     continuum_remove_rolling,
@@ -19,8 +18,6 @@ from yrep_spectrum_analysis import (
     shift_search,
     subtract_background,
     trim,
-    analyze_pca,
-    analyze_mcr,
     identify_components,
 )
 from yrep_spectrum_analysis.types import Signal, References
@@ -201,6 +198,9 @@ def run_mcr_tuned(
         
         spectra = mcr.ST_opt_
         concentrations = mcr.C_opt_
+        
+        if spectra is None or concentrations is None:
+            return {"error": "MCR-ALS fit failed to produce optimized components"}
         
         # Calculate reconstruction error (R²-like metric)
         X_reconstructed = concentrations @ spectra

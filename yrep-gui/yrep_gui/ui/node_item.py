@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from yrep_gui.nodes.registry import NodeDefinition
 
 if TYPE_CHECKING:  # pragma: no cover - hinting only
+    from PyQt6.QtGui import QPainter
     from yrep_gui.ui.node_editor import NodeEditor
 
 
@@ -226,12 +227,14 @@ class NodeItem(QGraphicsRectItem):
     # ------------------------------------------------------------------
     # QGraphicsItem overrides
     # ------------------------------------------------------------------
-    def paint(
+    def paint(  # type: ignore[override]
         self,
-        painter,
-        option: QStyleOptionGraphicsItem,
+        painter: "QPainter | None",
+        option: QStyleOptionGraphicsItem | None,
         widget: QWidget | None = None,
     ) -> None:
+        if painter is None:
+            return
         painter.setRenderHint(painter.RenderHint.Antialiasing)
         painter.setPen(self.pen())
         painter.setBrush(QBrush(COLOR_BACKGROUND_SELECTED if self.isSelected() else COLOR_BACKGROUND))

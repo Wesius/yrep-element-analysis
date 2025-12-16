@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QTextEdit,
 )
 
-from yrep_spectrum_analysis.types import DetectionResult, References, Signal, Templates
+from yrep_spectrum_analysis.types import DetectionResult, Signal, Templates
 from yrep_spectrum_analysis.utils import (
     group_signals,
     is_junk_group,
@@ -35,7 +35,7 @@ from yrep_gui.nodes import registry
 from yrep_gui.services.pipeline_runner import PipelineRunner
 from yrep_gui.ui.inspector import InspectorPanel
 from yrep_gui.ui.node_editor import NODE_MIME_TYPE, NodeEditor
-from yrep_gui.ui.node_item import NodeConnection, NodeItem, NodePort
+from yrep_gui.ui.node_item import NodeItem
 from yrep_gui.ui.workflow_dialog import WorkflowBuilderDialog
 
 
@@ -84,7 +84,13 @@ class MainWindow(QMainWindow):
 
         self._node_editor.nodeSelected.connect(self._update_inspector)
         self._install_menu_bar()
-        self.statusBar().showMessage("Ready")
+        self._show_status("Ready")
+
+    def _show_status(self, message: str, timeout: int = 0) -> None:
+        """Show a message in the status bar (if available)."""
+        bar = self.statusBar()
+        if bar:
+            bar.showMessage(message, timeout)
 
     # ------------------------------------------------------------------
     # Dock setup
@@ -197,7 +203,7 @@ class MainWindow(QMainWindow):
             self._inspector_panel.set_node(None)
         if self._log_view is not None:
             self._log_view.clear()
-        self.statusBar().showMessage("Started a new graph", 2000)
+        self._show_status("Started a new graph", 2000)
 
     def _action_unimplemented(self) -> None:
         QMessageBox.information(self, "Not Implemented", "This feature is not implemented yet.")
@@ -244,7 +250,7 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.critical(self, "Save Failed", f"Could not save graph:\n{exc}")
             return
-        self.statusBar().showMessage(f"Saved graph: {file_path.name}", 3000)
+        self._show_status(f"Saved graph: {file_path.name}", 3000)
 
     def _action_generate_workflow(self) -> None:
         """Open AI workflow builder dialog."""
@@ -256,7 +262,7 @@ class MainWindow(QMainWindow):
                     self._node_editor.load_graph_data(graph_data)
                     if self._inspector_panel is not None:
                         self._inspector_panel.set_node(self._node_editor.selected_node())
-                    self.statusBar().showMessage("AI-generated workflow loaded", 3000)
+                    self._show_status("AI-generated workflow loaded", 3000)
                 except Exception as exc:
                     QMessageBox.critical(
                         self,
@@ -274,7 +280,7 @@ class MainWindow(QMainWindow):
                 outputs = self._execute_node(node, inputs)
                 results[node_id] = outputs
             self._report_results(results, node_map, dependents)
-            self.statusBar().showMessage("Pipeline run completed", 3000)
+            self._show_status("Pipeline run completed", 3000)
         except GraphExecutionError as exc:
             self._append_log(f"ERROR: {exc}")
             QMessageBox.critical(self, "Pipeline Error", str(exc))
@@ -291,23 +297,23 @@ class MainWindow(QMainWindow):
 
     def _action_fit_all_nodes(self) -> None:
         self._node_editor.view.fit_all_nodes()
-        self.statusBar().showMessage("View fitted to all nodes", 2000)
+        self._show_status("View fitted to all nodes", 2000)
 
     def _action_reset_zoom(self) -> None:
         self._node_editor.view.reset_zoom()
-        self.statusBar().showMessage("Zoom reset to 100%", 2000)
+        self._show_status("Zoom reset to 100%", 2000)
 
     def _action_center_view(self) -> None:
         self._node_editor.view.center_view()
-        self.statusBar().showMessage("View centered on origin", 2000)
+        self._show_status("View centered on origin", 2000)
 
     def _action_zoom_in(self) -> None:
         self._node_editor.view.scale(1.15, 1.15)
-        self.statusBar().showMessage("Zoomed in", 1000)
+        self._show_status("Zoomed in", 1000)
 
     def _action_zoom_out(self) -> None:
         self._node_editor.view.scale(1 / 1.15, 1 / 1.15)
-        self.statusBar().showMessage("Zoomed out", 1000)
+        self._show_status("Zoomed out", 1000)
 
     # ------------------------------------------------------------------
     # Palette / inspector plumbing
@@ -318,7 +324,7 @@ class MainWindow(QMainWindow):
             return
         definition = registry.get(str(identifier))
         node = self._node_editor.add_node(definition)
-        self.statusBar().showMessage(f"Added node: {definition.title}", 2000)
+        self._show_status(f"Added node: {definition.title}", 2000)
         self._update_inspector(node)
 
     def _update_inspector(self, node: NodeItem | None) -> None:
@@ -346,12 +352,18 @@ class MainWindow(QMainWindow):
             incoming[node.instance_id] = port_map
 
         for edge in edges:
-            src_node = edge.start_port.owner
-            dst_node = edge.end_port.owner
+            start_port = edge.start_port
+            end_port = edge.end_port
+            if start_port is None or end_port is None:
+                continue
+            src_node = start_port.owner
+            dst_node = end_port.owner
+            if src_node is None or dst_node is None:
+                continue
             src_id = src_node.instance_id
             dst_id = dst_node.instance_id
-            src_port = edge.start_port.index
-            dst_port = edge.end_port.index
+            src_port = start_port.index
+            dst_port = end_port.index
             incoming[dst_id].setdefault(dst_port, []).append((src_id, src_port))
             if dst_id not in dependencies:
                 dependencies[dst_id] = set()
@@ -825,7 +837,7 @@ class MainWindow(QMainWindow):
         if self._inspector_panel is not None:
             self._inspector_panel.set_node(self._node_editor.selected_node())
         if label:
-            self.statusBar().showMessage(f"Loaded graph: {label}", 3000)
+            self._show_status(f"Loaded graph: {label}", 3000)
 
     def _append_log(self, message: str) -> None:
         if self._log_view is not None:

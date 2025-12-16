@@ -39,7 +39,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             try:
                 window.load_graph_payload(payload, label=selected_key)
             except Exception as exc:  # pragma: no cover - defensive path
-                window.statusBar().showMessage(f"Failed to load template: {exc}", 5000)
+                status_bar = window.statusBar()
+                if status_bar:
+                    status_bar.showMessage(f"Failed to load template: {exc}", 5000)
     window.show()
     return app.exec()
 
