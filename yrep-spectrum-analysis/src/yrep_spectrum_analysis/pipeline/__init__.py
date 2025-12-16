@@ -11,6 +11,12 @@ from .stages import (
     shift_search,
     detect_nnls,
 )
+from .decomposition import (
+    analyze_pca,
+    analyze_ica,
+    analyze_mcr,
+    identify_components,
+)
 
 __all__ = [
     "average_signals",
@@ -24,4 +30,8 @@ __all__ = [
     "build_templates",
     "shift_search",
     "detect_nnls",
+    "analyze_pca",
+    "analyze_ica",
+    "analyze_mcr",
+    "identify_components",
 ]

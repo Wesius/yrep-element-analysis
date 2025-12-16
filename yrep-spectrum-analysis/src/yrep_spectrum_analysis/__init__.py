@@ -12,6 +12,10 @@ from .pipeline import (
     shift_search,
     subtract_background,
     trim,
+    analyze_pca,
+    analyze_ica,
+    analyze_mcr,
+    identify_components,
 )
 from .types import Detection, DetectionResult, References, Signal, Templates
 
@@ -27,6 +31,10 @@ __all__ = [
     "shift_search",
     "subtract_background",
     "trim",
+    "analyze_pca",
+    "analyze_ica",
+    "analyze_mcr",
+    "identify_components",
     "Detection",
     "DetectionResult",
     "References",
