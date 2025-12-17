@@ -15,7 +15,8 @@ def identify_components(
     components: np.ndarray, 
     wavelength: np.ndarray,
     references: References,
-    top_n: int = 3
+    top_n: int = 3,
+    species_filter: list[str] | None = None,
 ) -> list[list[tuple[str, float]]]:
     """
     Match extracted spectral components to known reference elements.
@@ -25,6 +26,8 @@ def identify_components(
         wavelength: Array of shape (n_wavelengths,)
         references: The Loaded reference lines
         top_n: Number of top matches to return per component
+        species_filter: Optional list of species to consider (filters out noise-prone 
+                       elements like actinides that have too many lines)
         
     Returns:
         A list of lists, where each inner list contains (Element, Score) tuples
@@ -44,7 +47,7 @@ def identify_components(
     
     # We can reuse the build_templates logic but we need to access the raw matrix
     # Let's build templates for all available species
-    templates = build_templates(dummy_sig, references, fwhm_nm=0.5)
+    templates = build_templates(dummy_sig, references, fwhm_nm=0.5, species_filter=species_filter)
     ref_matrix = templates.matrix
     ref_species = templates.species
     
