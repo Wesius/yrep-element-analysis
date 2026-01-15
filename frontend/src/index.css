@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+/* Custom base styles */
+:root {
+  --color-primary: #4AA0E0;
+  --color-secondary: #FF6B6B;
+  --color-accent: #4ECDC4;
+  --color-background: #1a1a2e;
+  --color-surface: #16213e;
+  --color-text: #e8e8e8;
+}
+
+body {
+  @apply bg-slate-900 text-slate-100 m-0;
+  min-height: 100vh;
+}
+
+#root {
+  @apply h-screen w-screen;
+}
+
+/* React Flow customizations */
+.react-flow__node {
+  @apply rounded-lg shadow-lg;
+}
+
+.react-flow__handle {
+  @apply w-3 h-3 bg-blue-400 border-2 border-slate-700;
+}
+
+.react-flow__edge-path {
+  @apply stroke-blue-400 stroke-2;
+}
+
+.react-flow__background {
+  @apply bg-slate-900;
+}
