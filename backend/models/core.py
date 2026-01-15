@@ -1,7 +1,14 @@
 """Core data models for spectral analysis."""
 
+from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+
+
+class ExportFormat(str, Enum):
+    """Supported export formats."""
+    CSV = "csv"
+    JSON = "json"
 
 
 class Signal(BaseModel):
@@ -101,4 +108,39 @@ class DirectoryListing(BaseModel):
     parent: Optional[str] = Field(
         default=None,
         description="Parent directory path"
+    )
+
+
+class ExportRequest(BaseModel):
+    """Request to export detection results."""
+    result: DetectionResult = Field(
+        description="Detection result to export"
+    )
+    format: ExportFormat = Field(
+        default=ExportFormat.JSON,
+        description="Export format (csv or json)"
+    )
+    include_signal: bool = Field(
+        default=False,
+        description="Include full signal data in export (can be large)"
+    )
+    filename: Optional[str] = Field(
+        default=None,
+        description="Optional filename for the export (without extension)"
+    )
+
+
+class ExportResponse(BaseModel):
+    """Response containing exported data."""
+    filename: str = Field(
+        description="Suggested filename for the export"
+    )
+    format: ExportFormat = Field(
+        description="Export format used"
+    )
+    content: str = Field(
+        description="Exported content as string (CSV or JSON)"
+    )
+    detection_count: int = Field(
+        description="Number of detections in the export"
     )
