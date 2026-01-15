@@ -1,6 +1,7 @@
 """Pipeline graph API routes."""
 
-from typing import Dict, List, Set, Any
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Any
 from fastapi import APIRouter, HTTPException
 
 from backend.models.pipeline import (
@@ -12,6 +13,7 @@ from backend.models.pipeline import (
     NodeExecutionResult,
 )
 from backend.nodes import get_node_definition
+from backend.services.executor import PipelineExecutor, ExecutionError
 
 router = APIRouter()
 
@@ -202,11 +204,11 @@ async def analyze_pipeline(graph: PipelineGraph):
 async def execute_pipeline(request: PipelineExecutionRequest):
     """Execute a pipeline graph.
 
-    Runs the pipeline and returns results from all nodes.
+    Runs the pipeline using the yrep-spectrum-analysis library and returns
+    results from all nodes including terminal outputs.
 
-    Note: Full execution requires the yrep-spectrum-analysis library.
-    This endpoint validates the graph and returns a placeholder result
-    indicating the pipeline structure is valid.
+    The workspace_root parameter is used to resolve relative file paths
+    in load nodes.
     """
     graph = request.graph
 
@@ -230,28 +232,16 @@ async def execute_pipeline(request: PipelineExecutionRequest):
             execution_order=[],
         )
 
-    order = _get_execution_order(graph)
+    # Determine workspace root
+    workspace_root = None
+    if request.workspace_root:
+        workspace_root = Path(request.workspace_root).expanduser().resolve()
 
-    # For now, return a placeholder indicating validation passed
-    # Full execution will be implemented in the pipeline executor service
-    node_results = []
-    for node_id in order:
-        node = next(n for n in graph.nodes if n.id == node_id)
-        node_def = get_node_definition(node.identifier)
-        node_results.append(NodeExecutionResult(
-            node_id=node_id,
-            status="skipped",
-            output_type=node_def.outputs[0].type if node_def and node_def.outputs else None,
-            output_summary=f"Execution pending ({node_def.title if node_def else node.identifier})",
-        ))
+    # Execute the pipeline
+    executor = PipelineExecutor(workspace_root=workspace_root)
+    result = executor.execute(graph)
 
-    return PipelineExecutionResult(
-        status="partial",
-        node_results=node_results,
-        terminal_outputs={},
-        execution_order=order,
-        error="Full execution not yet implemented - graph validation passed",
-    )
+    return result
 
 
 @router.post("/from-template")
