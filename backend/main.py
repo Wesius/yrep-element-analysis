@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routes import files, nodes, pipelines, presets, visualizations
+from backend.routes import files, nodes, pipelines, presets, references, visualizations
 
 app = FastAPI(
     title="YREP Spectral Analysis API",
@@ -25,6 +25,7 @@ app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(nodes.router, prefix="/api/nodes", tags=["nodes"])
 app.include_router(pipelines.router, prefix="/api/pipelines", tags=["pipelines"])
 app.include_router(presets.router, prefix="/api/presets", tags=["presets"])
+app.include_router(references.router, prefix="/api/references", tags=["references"])
 app.include_router(visualizations.router, prefix="/api/visualizations", tags=["visualizations"])
 
 
