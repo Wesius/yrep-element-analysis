@@ -166,18 +166,32 @@ async def test_analyze_invalid_pipeline_error(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_execute_valid_pipeline(client: AsyncClient):
+async def test_execute_valid_pipeline(client: AsyncClient, sample_spectrum_file):
     """Test execution of valid pipeline."""
-    request = {"graph": VALID_SIMPLE_PIPELINE}
+    # Create a pipeline with a real spectrum file
+    pipeline = {
+        "version": 1,
+        "name": "Test Pipeline",
+        "nodes": [
+            {"id": "1", "identifier": "load_signal", "config": {"path": str(sample_spectrum_file)}, "position": {"x": 0, "y": 0}},
+            {"id": "2", "identifier": "trim", "config": {"min_nm": 300, "max_nm": 600}, "position": {"x": 200, "y": 0}},
+        ],
+        "edges": [
+            {"id": "e1", "source_node": "1", "source_port": 0, "target_node": "2", "target_port": 0}
+        ],
+    }
+    request = {"graph": pipeline}
     response = await client.post("/api/pipelines/execute", json=request)
 
     assert response.status_code == 200
     data = response.json()
-    # Should return partial status (placeholder implementation)
-    assert data["status"] in ["partial", "success"]
+    assert data["status"] == "success"
     assert "node_results" in data
     assert "execution_order" in data
     assert len(data["node_results"]) == 2
+    # Verify all nodes succeeded
+    for result in data["node_results"]:
+        assert result["status"] == "success"
 
 
 @pytest.mark.asyncio

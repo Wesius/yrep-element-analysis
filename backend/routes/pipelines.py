@@ -270,7 +270,10 @@ async def execute_pipeline(request: PipelineExecutionRequest):
         workspace_root = Path(request.workspace_root).expanduser().resolve()
 
     # Execute the pipeline
-    executor = PipelineExecutor(workspace_root=workspace_root)
+    executor = PipelineExecutor(
+        workspace_root=workspace_root,
+        timeout=request.timeout,
+    )
     result = executor.execute(graph)
 
     return result

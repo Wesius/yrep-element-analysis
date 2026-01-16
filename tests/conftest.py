@@ -35,8 +35,8 @@ def temp_dir() -> Generator[Path, None, None]:
 def sample_spectrum_file(temp_dir: Path) -> Path:
     """Create a sample spectrum file for testing."""
     spectrum_file = temp_dir / "sample.txt"
-    # Create a simple two-column spectrum file
-    content = """# Sample spectrum
+    # Create spectrum file in expected format (with header marker)
+    content = """>>>>>Begin Spectral Data<<<<<
 300.0\t0.1
 350.0\t0.5
 400.0\t1.0
@@ -55,10 +55,10 @@ def sample_spectrum_dir(temp_dir: Path) -> Path:
     spectra_dir = temp_dir / "spectra"
     spectra_dir.mkdir()
 
-    # Create a few spectrum files
+    # Create a few spectrum files in expected format
     for i in range(3):
         spectrum_file = spectra_dir / f"sample_{i}.txt"
-        content = f"""# Sample spectrum {i}
+        content = f""">>>>>Begin Spectral Data<<<<<
 300.0\t{0.1 + i * 0.1}
 400.0\t{0.5 + i * 0.1}
 500.0\t{0.3 + i * 0.1}

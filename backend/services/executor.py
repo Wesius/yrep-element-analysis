@@ -45,8 +45,20 @@ from backend.models.pipeline import (
 from backend.nodes import get_node_definition
 
 
+# Default timeout for pipeline execution (5 minutes)
+DEFAULT_EXECUTION_TIMEOUT = 300.0
+
+# Maximum number of items to serialize in lists (to prevent memory issues)
+MAX_SERIALIZED_LIST_ITEMS = 1000
+
+
 class ExecutionError(Exception):
     """Raised when pipeline execution fails."""
+    pass
+
+
+class ExecutionTimeoutError(ExecutionError):
+    """Raised when pipeline execution exceeds timeout."""
     pass
 
 
@@ -95,6 +107,26 @@ class ExecutionContext:
         return resolved
 
 
+def _safe_float(value: Any, name: str, default: float) -> float:
+    """Safely convert config value to float with clear error message."""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError) as e:
+        raise ExecutionError(f"Invalid value for '{name}': expected number, got {type(value).__name__} ({value!r})")
+
+
+def _safe_int(value: Any, name: str, default: int) -> int:
+    """Safely convert config value to int with clear error message."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError) as e:
+        raise ExecutionError(f"Invalid value for '{name}': expected integer, got {type(value).__name__} ({value!r})")
+
+
 class PipelineExecutor:
     """Executes pipeline graphs using yrep-spectrum-analysis functions.
 
@@ -102,8 +134,13 @@ class PipelineExecutor:
     to provide headless pipeline execution for the API backend.
     """
 
-    def __init__(self, workspace_root: Optional[Path] = None):
+    def __init__(
+        self,
+        workspace_root: Optional[Path] = None,
+        timeout: Optional[float] = None,
+    ):
         self.workspace_root = workspace_root or Path.cwd()
+        self.timeout = timeout if timeout is not None else DEFAULT_EXECUTION_TIMEOUT
 
         # Map of callable functions for pipeline stages
         self._callables: Dict[str, Callable[..., Any]] = {
@@ -137,6 +174,14 @@ class PipelineExecutor:
 
             # Execute nodes in order
             for node_id in order:
+                # Check timeout before starting each node
+                elapsed = time.time() - start_time
+                if self.timeout > 0 and elapsed >= self.timeout:
+                    raise ExecutionTimeoutError(
+                        f"Pipeline execution timed out after {elapsed:.1f}s "
+                        f"(limit: {self.timeout:.1f}s)"
+                    )
+
                 node = node_map[node_id]
                 node_start = time.time()
 
@@ -215,7 +260,8 @@ class PipelineExecutor:
             Tuple of (execution_order, node_map, incoming_edges, dependents)
         """
         if not graph.nodes:
-            raise ExecutionError("The graph is empty.")
+            # Empty pipeline is valid - return empty execution order
+            return [], {}, {}, {}
 
         node_map = {node.id: node for node in graph.nodes}
         incoming: Dict[str, Dict[int, List[Tuple[str, int]]]] = {}
@@ -235,8 +281,10 @@ class PipelineExecutor:
             src_port = edge.source_port
             dst_port = edge.target_port
 
-            if src_id not in node_map or dst_id not in node_map:
-                continue
+            if src_id not in node_map:
+                raise ExecutionError(f"Edge '{edge.id}' references unknown source node: {src_id}")
+            if dst_id not in node_map:
+                raise ExecutionError(f"Edge '{edge.id}' references unknown target node: {dst_id}")
 
             incoming[dst_id].setdefault(dst_port, []).append((src_id, src_port))
             dependencies[dst_id].add(src_id)
@@ -418,8 +466,8 @@ class PipelineExecutor:
             return normalize(func(
                 signal,
                 templates,
-                spread_nm=float(config.get("spread_nm", 0.5)),
-                iterations=int(config.get("iterations", 3)),
+                spread_nm=_safe_float(config.get("spread_nm"), "spread_nm", 0.5),
+                iterations=_safe_int(config.get("iterations"), "iterations", 3),
             ))
 
         if identifier == "detect_nnls":
@@ -427,8 +475,8 @@ class PipelineExecutor:
             return normalize(func(
                 signal,
                 templates,
-                presence_threshold=float(config.get("presence_threshold", 0.02)),
-                min_bands=int(config.get("min_bands", 5)),
+                presence_threshold=_safe_float(config.get("presence_threshold"), "presence_threshold", 0.02),
+                min_bands=_safe_int(config.get("min_bands"), "min_bands", 5),
             ))
 
         if identifier == "mask":
@@ -442,9 +490,9 @@ class PipelineExecutor:
             n_points = config.get("n_points")
             step_nm = config.get("step_nm")
             if n_points:
-                kwargs["n_points"] = int(n_points)
+                kwargs["n_points"] = _safe_int(n_points, "n_points", 0)
             if step_nm:
-                kwargs["step_nm"] = float(step_nm)
+                kwargs["step_nm"] = _safe_float(step_nm, "step_nm", 0.0)
             return normalize(func(signal, **kwargs))
 
         if identifier == "trim":
@@ -454,7 +502,7 @@ class PipelineExecutor:
 
         if identifier in {"continuum_remove_arpls", "continuum_remove_rolling"}:
             signal = inputs[0]
-            strength = float(config.get("strength", 0.5))
+            strength = _safe_float(config.get("strength"), "strength", 0.5)
             return normalize(func(signal, strength=strength))
 
         # Fallback for unary operations
@@ -573,27 +621,31 @@ class PipelineExecutor:
         if not batch:
             raise ExecutionError("Group Signals received an empty batch.")
 
-        grid_points = int(config.get("grid_points", 1000))
+        grid_points = _safe_int(config.get("grid_points"), "grid_points", 1000)
         groups_raw = group_signals(batch, grid_points=grid_points)
 
         payload = []
-        for group in groups_raw:
+        for group_idx, group in enumerate(groups_raw):
             qualities = [signal_quality(sig) for sig in group]
             mean_quality = float(np.mean(qualities)) if qualities else 0.0
             junk = bool(is_junk_group(group))
 
             avg_quality = 0.0
+            avg_error = None
             try:
                 averaged = average_signals(group, n_points=grid_points)
                 avg_quality = float(signal_quality(averaged))
-            except Exception:
+            except Exception as e:
                 avg_quality = 0.0
+                avg_error = str(e)
+                ctx.log(f"Warning: Failed to compute average quality for group {group_idx + 1}: {e}")
 
             payload.append({
                 "signals": group,
                 "junk": junk,
                 "quality_mean": mean_quality,
                 "avg_quality": avg_quality,
+                "avg_error": avg_error,
                 "size": len(group),
             })
 
@@ -615,7 +667,7 @@ class PipelineExecutor:
             raise ExecutionError("Select Best Group received no groups.")
 
         metric = str(config.get("quality_metric", "avg_quality")).lower()
-        min_quality = float(config.get("min_quality", 0.0))
+        min_quality = _safe_float(config.get("min_quality"), "min_quality", 0.0)
         metric_key = "avg_quality" if metric not in {"avg_quality", "quality_mean"} else metric
 
         def score(group_info: Dict[str, Any]) -> float:
@@ -669,7 +721,7 @@ class PipelineExecutor:
         if not flattened:
             raise ExecutionError("Average Signals requires at least one input signal.")
 
-        n_points = int(config.get("n_points", 1000))
+        n_points = _safe_int(config.get("n_points"), "n_points", 1000)
         result = average_signals(flattened, n_points=n_points)
         ctx.log(f"Averaged {len(flattened)} signals to {n_points} points")
         return result
@@ -725,7 +777,7 @@ class PipelineExecutor:
             bands_kwargs = {}
 
         return {
-            "fwhm_nm": float(config.get("fwhm_nm", 0.75)),
+            "fwhm_nm": _safe_float(config.get("fwhm_nm"), "fwhm_nm", 0.75),
             "species_filter": species_filter,
             "bands_kwargs": dict(bands_kwargs),
         }
@@ -736,9 +788,9 @@ class PipelineExecutor:
         min_nm = config.get("min_nm")
         max_nm = config.get("max_nm")
         if min_nm not in (None, ""):
-            kwargs["min_nm"] = float(min_nm)
+            kwargs["min_nm"] = _safe_float(min_nm, "min_nm", 0.0)
         if max_nm not in (None, ""):
-            kwargs["max_nm"] = float(max_nm)
+            kwargs["max_nm"] = _safe_float(max_nm, "max_nm", 0.0)
         return kwargs
 
     def _coerce_intervals(self, intervals: Any) -> List[Tuple[float, float]]:
@@ -746,10 +798,13 @@ class PipelineExecutor:
         if not intervals:
             return []
         parsed: List[Tuple[float, float]] = []
-        for entry in intervals:
+        for idx, entry in enumerate(intervals):
             if isinstance(entry, (list, tuple)) and len(entry) == 2:
                 a, b = entry
-                parsed.append((float(a), float(b)))
+                parsed.append((
+                    _safe_float(a, f"intervals[{idx}][0]", 0.0),
+                    _safe_float(b, f"intervals[{idx}][1]", 0.0),
+                ))
         return parsed
 
     def _build_templates_wrapper(
@@ -809,43 +864,59 @@ class PipelineExecutor:
     def _serialize_output(self, value: Any) -> Any:
         """Serialize output for JSON response."""
         if isinstance(value, Signal):
+            wl = value.wavelength
+            wl_range = [float(wl.min()), float(wl.max())] if len(wl) > 0 else [0.0, 0.0]
             return {
                 "type": "Signal",
-                "wavelength_count": len(value.wavelength),
-                "wavelength_range": [float(value.wavelength.min()), float(value.wavelength.max())],
+                "wavelength_count": len(wl),
+                "wavelength_range": wl_range,
                 "meta": value.meta,
             }
 
         if isinstance(value, Templates):
+            species = value.species
+            truncated = len(species) > MAX_SERIALIZED_LIST_ITEMS
             return {
                 "type": "Templates",
-                "species": value.species,
-                "species_count": len(value.species),
+                "species": species[:MAX_SERIALIZED_LIST_ITEMS],
+                "species_count": len(species),
+                "truncated": truncated,
             }
 
         if isinstance(value, DetectionResult):
+            detections = value.detections
+            truncated = len(detections) > MAX_SERIALIZED_LIST_ITEMS
             return {
                 "type": "DetectionResult",
-                "detection_count": len(value.detections),
+                "detection_count": len(detections),
                 "detections": [
                     {
                         "species": d.species,
                         "score": d.score,
                         "meta": d.meta,
                     }
-                    for d in value.detections
+                    for d in detections[:MAX_SERIALIZED_LIST_ITEMS]
                 ],
                 "meta": value.meta,
+                "truncated": truncated,
             }
 
         if isinstance(value, References):
+            species = list(value.lines.keys())
+            truncated = len(species) > MAX_SERIALIZED_LIST_ITEMS
             return {
                 "type": "References",
-                "species": list(value.lines.keys()),
+                "species": species[:MAX_SERIALIZED_LIST_ITEMS],
+                "species_count": len(species),
+                "truncated": truncated,
             }
 
         if isinstance(value, tuple):
-            return [self._serialize_output(v) for v in value]
+            truncated = len(value) > MAX_SERIALIZED_LIST_ITEMS
+            items = [self._serialize_output(v) for v in value[:MAX_SERIALIZED_LIST_ITEMS]]
+            if truncated:
+                return {"items": items, "count": len(value), "truncated": True}
+            return items
 
         if isinstance(value, list):
             if value and isinstance(value[0], Signal):
@@ -853,10 +924,20 @@ class PipelineExecutor:
                     "type": "SignalBatch",
                     "count": len(value),
                 }
-            return [self._serialize_output(v) for v in value]
+            truncated = len(value) > MAX_SERIALIZED_LIST_ITEMS
+            items = [self._serialize_output(v) for v in value[:MAX_SERIALIZED_LIST_ITEMS]]
+            if truncated:
+                return {"items": items, "count": len(value), "truncated": True}
+            return items
 
         if isinstance(value, dict):
-            return {k: self._serialize_output(v) for k, v in value.items()}
+            keys = list(value.keys())
+            truncated = len(keys) > MAX_SERIALIZED_LIST_ITEMS
+            result = {k: self._serialize_output(value[k]) for k in keys[:MAX_SERIALIZED_LIST_ITEMS]}
+            if truncated:
+                result["_truncated"] = True
+                result["_total_keys"] = len(keys)
+            return result
 
         return value
 
@@ -881,7 +962,10 @@ class PipelineExecutor:
     def _summarize_output(self, value: Any) -> str:
         """Generate a human-readable summary of output."""
         if isinstance(value, Signal):
-            return f"Signal: {len(value.wavelength)} points, {value.wavelength.min():.1f}-{value.wavelength.max():.1f} nm"
+            wl = value.wavelength
+            if len(wl) == 0:
+                return "Signal: 0 points (empty)"
+            return f"Signal: {len(wl)} points, {wl.min():.1f}-{wl.max():.1f} nm"
 
         if isinstance(value, Templates):
             return f"Templates: {len(value.species)} species"

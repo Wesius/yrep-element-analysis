@@ -85,6 +85,10 @@ class PipelineExecutionRequest(BaseModel):
         default=None,
         description="Root directory for resolving relative paths"
     )
+    timeout: Optional[float] = Field(
+        default=None,
+        description="Execution timeout in seconds (default: 300)"
+    )
 
 
 class NodeExecutionResult(BaseModel):
