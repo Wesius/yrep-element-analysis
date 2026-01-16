@@ -62,10 +62,15 @@ class ExecutionTimeoutError(ExecutionError):
     pass
 
 
+# Uploads directory - same as in files.py
+UPLOADS_DIR = Path(__file__).parent.parent.parent / "uploads"
+
+
 @dataclass
 class ExecutionContext:
     """Context for pipeline execution."""
     workspace_root: Path = field(default_factory=Path.cwd)
+    uploads_dir: Path = field(default_factory=lambda: UPLOADS_DIR)
     results: Dict[str, Any] = field(default_factory=dict)
     node_results: List[NodeExecutionResult] = field(default_factory=list)
     logs: List[str] = field(default_factory=list)
@@ -77,8 +82,8 @@ class ExecutionContext:
     def resolve_path(self, path_str: str) -> Path:
         """Resolve a path relative to workspace root.
 
-        All paths are resolved relative to workspace_root. Absolute paths
-        and path traversal attempts are rejected for security.
+        Paths can be within workspace_root or uploads_dir. Absolute paths
+        are allowed if they're within these boundaries.
         """
         # Reject empty paths
         if not path_str or not path_str.strip():
@@ -86,25 +91,30 @@ class ExecutionContext:
 
         path = Path(path_str).expanduser()
 
-        # Always resolve relative to workspace_root for security
+        # Resolve the path
         if path.is_absolute():
             resolved = path.resolve()
         else:
             resolved = (self.workspace_root / path).resolve()
 
-        # Validate the resolved path stays within workspace_root
+        # Validate the resolved path stays within allowed directories
         workspace_resolved = self.workspace_root.resolve()
-        try:
-            if not (resolved == workspace_resolved or resolved.is_relative_to(workspace_resolved)):
-                raise ExecutionError(
-                    f"Path escapes workspace boundary: {path_str}"
-                )
-        except ValueError:
-            raise ExecutionError(
-                f"Path escapes workspace boundary: {path_str}"
-            )
+        uploads_resolved = self.uploads_dir.resolve()
 
-        return resolved
+        def is_within(check_path: Path, boundary: Path) -> bool:
+            try:
+                return check_path == boundary or check_path.is_relative_to(boundary)
+            except ValueError:
+                return False
+
+        if is_within(resolved, workspace_resolved):
+            return resolved
+        if is_within(resolved, uploads_resolved):
+            return resolved
+
+        raise ExecutionError(
+            f"Path escapes allowed boundaries: {path_str}"
+        )
 
 
 def _safe_float(value: Any, name: str, default: float) -> float:

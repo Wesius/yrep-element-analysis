@@ -180,7 +180,8 @@ async def test_execute_valid_pipeline(client: AsyncClient, sample_spectrum_file)
             {"id": "e1", "source_node": "1", "source_port": 0, "target_node": "2", "target_port": 0}
         ],
     }
-    request = {"graph": pipeline}
+    # Pass workspace_root to allow access to temp directory
+    request = {"graph": pipeline, "workspace_root": str(sample_spectrum_file.parent)}
     response = await client.post("/api/pipelines/execute", json=request)
 
     assert response.status_code == 200
