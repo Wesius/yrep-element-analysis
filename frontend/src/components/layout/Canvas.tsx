@@ -1,12 +1,14 @@
 /** Main pipeline canvas with React Flow */
 
-import { useCallback, useRef, type DragEvent } from 'react';
+import { useCallback, useEffect, useRef, type DragEvent } from 'react';
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Controls,
   MiniMap,
   BackgroundVariant,
+  useReactFlow,
   type Node,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -24,8 +26,9 @@ const nodeTypes = {
 let nodeIdCounter = 0;
 const generateNodeId = () => `node-${++nodeIdCounter}`;
 
-export function Canvas() {
+function CanvasInner() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const { screenToFlowPosition } = useReactFlow();
 
   const nodes = usePipelineStore((s) => s.nodes);
   const edges = usePipelineStore((s) => s.edges);
@@ -34,6 +37,18 @@ export function Canvas() {
   const onConnect = usePipelineStore((s) => s.onConnect);
   const addNode = usePipelineStore((s) => s.addNode);
   const nodeDefinitions = usePipelineStore((s) => s.nodeDefinitions);
+
+  // Sync nodeIdCounter with existing nodes to prevent ID collisions
+  useEffect(() => {
+    const maxId = nodes.reduce((max, node) => {
+      const match = node.id.match(/^node-(\d+)$/);
+      if (match) {
+        return Math.max(max, parseInt(match[1], 10));
+      }
+      return max;
+    }, 0);
+    nodeIdCounter = maxId;
+  }, [nodes]);
 
   // Handle drag over for dropping nodes
   const onDragOver = useCallback((event: DragEvent) => {
@@ -52,14 +67,11 @@ export function Canvas() {
       const nodeDef = nodeDefinitions.find((n) => n.identifier === nodeIdentifier);
       if (!nodeDef) return;
 
-      // Get drop position relative to canvas
-      const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect();
-      if (!reactFlowBounds) return;
-
-      const position = {
-        x: event.clientX - reactFlowBounds.left,
-        y: event.clientY - reactFlowBounds.top,
-      };
+      // Get drop position in flow coordinates (accounts for zoom/pan)
+      const position = screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
 
       const newNode: Node<PipelineNodeData> = {
         id: generateNodeId(),
@@ -79,7 +91,7 @@ export function Canvas() {
 
       addNode(newNode);
     },
-    [nodeDefinitions, addNode]
+    [nodeDefinitions, addNode, screenToFlowPosition]
   );
 
   // Minimap node color based on category
@@ -133,5 +145,14 @@ export function Canvas() {
         />
       </ReactFlow>
     </div>
+  );
+}
+
+/** Canvas wrapped with ReactFlowProvider for hook access */
+export function Canvas() {
+  return (
+    <ReactFlowProvider>
+      <CanvasInner />
+    </ReactFlowProvider>
   );
 }
