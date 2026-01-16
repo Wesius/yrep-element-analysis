@@ -166,7 +166,7 @@ export function PresetsPanel() {
   );
 }
 
-/** Individual preset card */
+/** Individual preset card - clicking builds graph on canvas */
 function PresetCard({
   preset,
   onBuild,
