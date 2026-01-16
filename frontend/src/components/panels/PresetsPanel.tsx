@@ -36,6 +36,10 @@ export function PresetsPanel() {
   const [selectedPreset, setSelectedPreset] = useState<Preset | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [buildingPreset, setBuildingPreset] = useState<string | null>(null);
+
+  const loadPipeline = usePipelineStore((s) => s.loadPipeline);
+  const setActivePanel = useUIStore((s) => s.setActivePanel);
 
   // Load presets on mount
   useEffect(() => {
@@ -64,6 +68,51 @@ export function PresetsPanel() {
       controller.abort();
     };
   }, []);
+
+  /** Build pipeline from preset with default parameters */
+  const handleBuildPreset = async (preset: Preset) => {
+    setBuildingPreset(preset.id);
+    try {
+      // Build default parameters from preset definition
+      const defaults: Record<string, unknown> = {};
+      preset.parameters.forEach((p) => {
+        defaults[p.name] = p.default ?? '';
+      });
+
+      const pipeline = await presetsAPI.buildPipeline(preset.id, defaults);
+
+      // Convert API pipeline to React Flow nodes/edges
+      const nodes = pipeline.nodes.map((n, i) => ({
+        id: n.id,
+        type: 'pipeline',
+        position: n.position || { x: 200 * (i % 3), y: 150 * Math.floor(i / 3) },
+        data: {
+          identifier: n.identifier,
+          title: n.identifier.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          category: 'Preset',
+          config: n.config,
+          inputs: [],
+          outputs: [],
+        },
+      }));
+
+      const edges = pipeline.edges.map((e) => ({
+        id: e.id,
+        source: e.source_node,
+        target: e.target_node,
+        sourceHandle: `output-${e.source_port}`,
+        targetHandle: `input-${e.target_port}`,
+        type: 'smoothstep',
+      }));
+
+      loadPipeline(nodes, edges);
+      setActivePanel('nodes');
+    } catch (err) {
+      setError(`Failed to build pipeline: ${getErrorMessage(err)}`);
+    } finally {
+      setBuildingPreset(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -113,7 +162,9 @@ export function PresetsPanel() {
             <PresetCard
               key={preset.id}
               preset={preset}
-              onSelect={() => setSelectedPreset(preset)}
+              onBuild={() => handleBuildPreset(preset)}
+              onConfigure={() => setSelectedPreset(preset)}
+              isBuilding={buildingPreset === preset.id}
             />
           ))
         )}
@@ -125,18 +176,19 @@ export function PresetsPanel() {
 /** Individual preset card */
 function PresetCard({
   preset,
-  onSelect,
+  onBuild,
+  onConfigure,
+  isBuilding,
 }: {
   preset: Preset;
-  onSelect: () => void;
+  onBuild: () => void;
+  onConfigure: () => void;
+  isBuilding: boolean;
 }) {
   const icon = presetIcons[preset.category] || presetIcons.default;
 
   return (
-    <button
-      onClick={onSelect}
-      className="w-full text-left p-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition-colors"
-    >
+    <div className="w-full p-3 bg-slate-700 rounded-lg">
       <div className="flex items-start gap-3">
         <span className="text-2xl">{icon}</span>
         <div className="flex-1 min-w-0">
@@ -154,10 +206,33 @@ function PresetCard({
               </span>
             ))}
           </div>
+          {/* Action buttons */}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={onBuild}
+              disabled={isBuilding}
+              className={`
+                flex-1 px-3 py-1.5 text-sm font-medium rounded transition-colors
+                ${isBuilding
+                  ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-500 text-white'
+                }
+              `}
+            >
+              {isBuilding ? 'Building...' : 'Build Graph'}
+            </button>
+            <button
+              onClick={onConfigure}
+              disabled={isBuilding}
+              className="px-3 py-1.5 text-sm text-slate-300 hover:text-white hover:bg-slate-600 rounded transition-colors"
+              title="Configure parameters"
+            >
+              ⚙️
+            </button>
+          </div>
         </div>
-        <span className="text-slate-500">→</span>
       </div>
-    </button>
+    </div>
   );
 }
 
