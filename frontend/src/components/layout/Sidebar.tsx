@@ -3,6 +3,8 @@
 import { useUIStore } from '../../store';
 import { NodePalette } from '../panels/NodePalette';
 import { ConfigPanel } from '../panels/ConfigPanel';
+import { PresetsPanel } from '../panels/PresetsPanel';
+import { ResultsPanel } from '../panels/ResultsPanel';
 
 const tabs = [
   { id: 'nodes' as const, label: 'Nodes', icon: '📦' },
@@ -41,29 +43,9 @@ export function Sidebar() {
       <div className="flex-1 overflow-hidden">
         {activePanel === 'nodes' && <NodePalette />}
         {activePanel === 'config' && <ConfigPanel />}
-        {activePanel === 'presets' && <PresetsPlaceholder />}
-        {activePanel === 'results' && <ResultsPlaceholder />}
+        {activePanel === 'presets' && <PresetsPanel />}
+        {activePanel === 'results' && <ResultsPanel />}
       </div>
-    </div>
-  );
-}
-
-/** Placeholder for presets panel */
-function PresetsPlaceholder() {
-  return (
-    <div className="p-4 text-slate-400 text-center">
-      <p className="mb-2">Presets</p>
-      <p className="text-sm">Quick-start templates for common workflows</p>
-    </div>
-  );
-}
-
-/** Placeholder for results panel */
-function ResultsPlaceholder() {
-  return (
-    <div className="p-4 text-slate-400 text-center">
-      <p className="mb-2">Results</p>
-      <p className="text-sm">Execute your pipeline to see results here</p>
     </div>
   );
 }
