@@ -4,6 +4,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Any
 from fastapi import APIRouter, HTTPException
 
+# Graph size limits to prevent resource exhaustion
+MAX_NODES = 100
+MAX_EDGES = 500
+
 from backend.models.pipeline import (
     PipelineGraph,
     PipelineNode,
@@ -119,12 +123,21 @@ async def validate_pipeline(graph: PipelineGraph):
     """Validate a pipeline graph.
 
     Checks for:
+    - Graph size limits
     - Valid node types
     - Valid port connections
     - No cycles
     - Required inputs connected
     """
-    errors = _validate_graph(graph)
+    errors = []
+
+    # Check graph size limits
+    if len(graph.nodes) > MAX_NODES:
+        errors.append(f"Graph exceeds maximum node limit ({len(graph.nodes)} > {MAX_NODES})")
+    if len(graph.edges) > MAX_EDGES:
+        errors.append(f"Graph exceeds maximum edge limit ({len(graph.edges)} > {MAX_EDGES})")
+
+    errors.extend(_validate_graph(graph))
 
     if not errors and _check_cycles(graph):
         errors.append("Graph contains cycles")
@@ -211,6 +224,25 @@ async def execute_pipeline(request: PipelineExecutionRequest):
     in load nodes.
     """
     graph = request.graph
+
+    # Check graph size limits
+    if len(graph.nodes) > MAX_NODES:
+        return PipelineExecutionResult(
+            status="error",
+            error=f"Graph exceeds maximum node limit ({len(graph.nodes)} > {MAX_NODES})",
+            node_results=[],
+            terminal_outputs={},
+            execution_order=[],
+        )
+
+    if len(graph.edges) > MAX_EDGES:
+        return PipelineExecutionResult(
+            status="error",
+            error=f"Graph exceeds maximum edge limit ({len(graph.edges)} > {MAX_EDGES})",
+            node_results=[],
+            terminal_outputs={},
+            execution_order=[],
+        )
 
     # Validate first
     errors = _validate_graph(graph)

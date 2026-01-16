@@ -1,10 +1,18 @@
 """Reference library API routes."""
 
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
+
+
+# Wavelength unit detection thresholds
+# NIST data typically uses Angstroms (3000-10000 for visible range)
+# Converted data uses nanometers (300-1000 for visible range)
+ANGSTROM_MIN_THRESHOLD = 2000  # Values above this likely Angstroms
+ANGSTROM_MAX_REASONABLE = 20000  # Sanity check for Angstrom values
 
 from backend.data import REFERENCES_DIR, list_bundled_references
 
@@ -93,8 +101,14 @@ async def get_bundled_reference(reference_id: str) -> Dict[str, Any]:
         wl_min = wl_max = None
         if wavelength_col:
             # Convert Angstroms to nm if needed
+            # Use robust detection: check if median value is in Angstrom range
             wl_values = df[wavelength_col].values
-            if wl_values.mean() > 1000:  # Likely Angstroms
+            wl_median = float(pd.Series(wl_values).median())
+            is_angstroms = (
+                wl_median > ANGSTROM_MIN_THRESHOLD and
+                wl_median < ANGSTROM_MAX_REASONABLE
+            )
+            if is_angstroms:
                 wl_values = wl_values / 10.0
             wl_min = float(wl_values.min())
             wl_max = float(wl_values.max())
@@ -156,14 +170,23 @@ async def get_reference_lines(
                 spectrum_col = col
 
         # Convert wavelength to nm if in Angstroms
-        if wavelength_col and df[wavelength_col].mean() > 1000:
-            df["wavelength_nm"] = df[wavelength_col] / 10.0
-        elif wavelength_col:
-            df["wavelength_nm"] = df[wavelength_col]
+        # Use robust detection: check if median value is in Angstrom range
+        if wavelength_col:
+            wl_median = float(df[wavelength_col].median())
+            is_angstroms = (
+                wl_median > ANGSTROM_MIN_THRESHOLD and
+                wl_median < ANGSTROM_MAX_REASONABLE
+            )
+            if is_angstroms:
+                df["wavelength_nm"] = df[wavelength_col] / 10.0
+            else:
+                df["wavelength_nm"] = df[wavelength_col]
 
         # Apply filters
         if species and spectrum_col:
-            df = df[df[spectrum_col].str.contains(species, case=False, na=False)]
+            # Escape regex special characters to prevent ReDoS
+            species_escaped = re.escape(species)
+            df = df[df[spectrum_col].str.contains(species_escaped, case=False, na=False, regex=True)]
 
         if min_wavelength and "wavelength_nm" in df.columns:
             df = df[df["wavelength_nm"] >= min_wavelength]

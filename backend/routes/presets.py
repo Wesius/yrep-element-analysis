@@ -1,5 +1,6 @@
 """Preset workflow API routes."""
 
+from pathlib import Path
 from typing import Dict, List, Any
 from fastapi import APIRouter, HTTPException
 
@@ -390,7 +391,7 @@ async def validate_preset_parameters(
             errors.append(f"Required parameter '{param.label}' is missing")
             continue
 
-        # Type validation (basic)
+        # Type validation
         if value is not None and value != "":
             if param.type == "number":
                 try:
@@ -400,6 +401,20 @@ async def validate_preset_parameters(
             elif param.type == "boolean":
                 if not isinstance(value, bool):
                     warnings.append(f"Parameter '{param.label}' should be boolean")
+            elif param.type == "file":
+                # Validate file path exists
+                path = Path(value).expanduser()
+                if not path.exists():
+                    errors.append(f"File not found: '{param.label}' ({value})")
+                elif not path.is_file():
+                    errors.append(f"Path is not a file: '{param.label}' ({value})")
+            elif param.type == "directory":
+                # Validate directory path exists
+                path = Path(value).expanduser()
+                if not path.exists():
+                    errors.append(f"Directory not found: '{param.label}' ({value})")
+                elif not path.is_dir():
+                    errors.append(f"Path is not a directory: '{param.label}' ({value})")
 
     return {
         "valid": len(errors) == 0,
@@ -440,6 +455,21 @@ async def build_pipeline_from_preset(
         raise HTTPException(
             status_code=500,
             detail=f"Preset references unknown template: {template_name}"
+        )
+
+    # Validate parameter mappings before building
+    mapping = preset.pipeline_template.get("parameter_mapping", {})
+    invalid_mappings = []
+    for param_name, mapping_path in mapping.items():
+        # Mapping format: "nodes.<node_id>.config.<field>"
+        parts = mapping_path.split(".")
+        if len(parts) < 4 or parts[0] != "nodes" or parts[2] != "config":
+            invalid_mappings.append(f"{param_name}: invalid mapping format '{mapping_path}'")
+
+    if invalid_mappings:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Invalid parameter mappings: {'; '.join(invalid_mappings)}"
         )
 
     # Build pipeline with parameters
