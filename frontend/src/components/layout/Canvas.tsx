@@ -96,19 +96,29 @@ function CanvasInner() {
 
   // Minimap node color based on category
   const minimapNodeColor = useCallback((node: Node) => {
-    const category = (node.data as PipelineNodeData)?.category;
-    switch (category) {
-      case 'I/O':
-        return '#10b981';
-      case 'Preprocess':
-        return '#3b82f6';
-      case 'Detection':
-        return '#8b5cf6';
-      case 'Utilities':
-        return '#f59e0b';
-      default:
-        return '#64748b';
+    // Type guard for PipelineNodeData
+    const data = node.data;
+    if (
+      typeof data === 'object' &&
+      data !== null &&
+      'category' in data &&
+      typeof (data as { category: unknown }).category === 'string'
+    ) {
+      const category = (data as PipelineNodeData).category;
+      switch (category) {
+        case 'I/O':
+          return '#10b981';
+        case 'Preprocess':
+          return '#3b82f6';
+        case 'Detection':
+          return '#8b5cf6';
+        case 'Utilities':
+          return '#f59e0b';
+        default:
+          return '#64748b';
+      }
     }
+    return '#64748b';
   }, []);
 
   return (

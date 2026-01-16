@@ -75,7 +75,7 @@ function PipelineNodeComponent({ id, data, selected }: NodeProps) {
 
         {/* Input handles */}
         {nodeData.inputs.map((input: Port, index: number) => (
-          <div key={input.name} className="relative flex items-center mb-1">
+          <div key={`input-${index}-${input.name}`} className="relative flex items-center mb-1">
             <Handle
               type="target"
               position={Position.Left}
@@ -92,7 +92,7 @@ function PipelineNodeComponent({ id, data, selected }: NodeProps) {
 
         {/* Output handles */}
         {nodeData.outputs.map((output: Port, index: number) => (
-          <div key={output.name} className="relative flex items-center justify-end mb-1">
+          <div key={`output-${index}-${output.name}`} className="relative flex items-center justify-end mb-1">
             <span className="text-xs text-slate-300 mr-2">{output.name}</span>
             <Handle
               type="source"

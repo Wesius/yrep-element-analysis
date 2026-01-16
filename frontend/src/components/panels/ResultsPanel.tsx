@@ -146,7 +146,7 @@ function ResultOutput({ output }: { output: unknown }) {
             <p className="text-xs text-slate-400">Detections:</p>
             {output.detections.slice(0, 5).map((d, i) => (
               <div
-                key={i}
+                key={`${d.species}-${i}`}
                 className="flex justify-between items-center text-xs bg-slate-600/50 px-2 py-1 rounded"
               >
                 <span className="text-slate-200">{d.species}</span>

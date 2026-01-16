@@ -4,6 +4,22 @@ import { usePipelineStore } from '../../store';
 import { pipelinesAPI } from '../../api/client';
 import type { PipelineGraphAPI } from '../../types';
 
+/** Extract error message from unknown error */
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+/** Safely parse port number from handle string */
+function parsePortNumber(handle: string | null | undefined, prefix: string): number {
+  if (!handle) return 0;
+  const stripped = handle.replace(prefix, '');
+  const parsed = parseInt(stripped, 10);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 export function Header() {
   const nodes = usePipelineStore((s) => s.nodes);
   const edges = usePipelineStore((s) => s.edges);
@@ -24,9 +40,9 @@ export function Header() {
     edges: edges.map((e) => ({
       id: e.id,
       source_node: e.source,
-      source_port: parseInt(e.sourceHandle?.replace('output-', '') || '0'),
+      source_port: parsePortNumber(e.sourceHandle, 'output-'),
       target_node: e.target,
-      target_port: parseInt(e.targetHandle?.replace('input-', '') || '0'),
+      target_port: parsePortNumber(e.targetHandle, 'input-'),
     })),
   });
 
@@ -41,7 +57,7 @@ export function Header() {
         alert(`Validation errors:\n${result.errors.join('\n')}`);
       }
     } catch (err) {
-      alert(`Validation failed: ${err}`);
+      alert(`Validation failed: ${getErrorMessage(err)}`);
     }
   };
 
@@ -68,7 +84,7 @@ export function Header() {
         alert(`Execution error: ${result.error}`);
       }
     } catch (err) {
-      alert(`Execution failed: ${err}`);
+      alert(`Execution failed: ${getErrorMessage(err)}`);
     } finally {
       setExecuting(false);
     }

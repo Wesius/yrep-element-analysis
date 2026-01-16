@@ -6,6 +6,23 @@ import type { Preset, PresetParameter, BundledReference } from '../../types';
 import { usePipelineStore, useUIStore } from '../../store';
 import { SpectraDropZone } from '../common/SpectraDropZone';
 
+/** Extract error message from unknown error */
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+/** Safely extract directory path from a file path */
+function getDirectoryPath(filePath: string): string {
+  const lastSlash = filePath.lastIndexOf('/');
+  if (lastSlash === -1) {
+    return filePath; // No slash found, return as-is
+  }
+  return filePath.substring(0, lastSlash);
+}
+
 /** Icon mapping for preset categories */
 const presetIcons: Record<string, string> = {
   Detection: '🔍',
@@ -22,18 +39,30 @@ export function PresetsPanel() {
 
   // Load presets on mount
   useEffect(() => {
+    const controller = new AbortController();
+
     const loadPresets = async () => {
       try {
         const result = await presetsAPI.list();
-        setPresets(result.presets);
+        if (!controller.signal.aborted) {
+          setPresets(result.presets);
+        }
       } catch (err) {
-        setError(`Failed to load presets: ${err}`);
+        if (!controller.signal.aborted) {
+          setError(`Failed to load presets: ${getErrorMessage(err)}`);
+        }
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     };
 
     loadPresets();
+
+    return () => {
+      controller.abort();
+    };
   }, []);
 
   if (loading) {
@@ -109,9 +138,9 @@ function PresetCard({
             {preset.description}
           </p>
           <div className="flex flex-wrap gap-1 mt-2">
-            {preset.use_cases.slice(0, 2).map((useCase, i) => (
+            {preset.use_cases.slice(0, 2).map((useCase) => (
               <span
-                key={i}
+                key={useCase}
                 className="text-xs px-2 py-0.5 bg-slate-600 rounded text-slate-300"
               >
                 {useCase}
@@ -152,15 +181,23 @@ function PresetParameterForm({
 
   // Load bundled references for reference_path fields
   useEffect(() => {
+    const controller = new AbortController();
+
     const loadRefs = async () => {
       try {
         const result = await referencesAPI.listBundled();
-        setBundledRefs(result.references);
+        if (!controller.signal.aborted) {
+          setBundledRefs(result.references);
+        }
       } catch {
         // Ignore - refs are optional
       }
     };
     loadRefs();
+
+    return () => {
+      controller.abort();
+    };
   }, []);
 
   const handleParameterChange = (name: string, value: unknown) => {
@@ -180,7 +217,7 @@ function PresetParameterForm({
         return false;
       }
     } catch (err) {
-      setErrors([`Validation failed: ${err}`]);
+      setErrors([`Validation failed: ${getErrorMessage(err)}`]);
       return false;
     } finally {
       setValidating(false);
@@ -221,7 +258,7 @@ function PresetParameterForm({
       loadPipeline(nodes, edges);
       setActivePanel('nodes');
     } catch (err) {
-      setErrors([`Failed to build pipeline: ${err}`]);
+      setErrors([`Failed to build pipeline: ${getErrorMessage(err)}`]);
     }
   };
 
@@ -241,7 +278,7 @@ function PresetParameterForm({
       setExecutionResult(result);
       setActivePanel('results');
     } catch (err) {
-      setErrors([`Execution failed: ${err}`]);
+      setErrors([`Execution failed: ${getErrorMessage(err)}`]);
     } finally {
       setExecuting(false);
     }
@@ -297,8 +334,8 @@ function PresetParameterForm({
               Validation Errors
             </h4>
             <ul className="text-xs text-red-300 space-y-1">
-              {errors.map((err, i) => (
-                <li key={i}>• {err}</li>
+              {errors.map((err) => (
+                <li key={err}>• {err}</li>
               ))}
             </ul>
           </div>
@@ -428,7 +465,7 @@ function ParameterInput({
                     const ref = bundledRefs.find(r => r.id === e.target.value);
                     if (ref) {
                       // Use the directory containing the bundled refs
-                      const dirPath = ref.path.substring(0, ref.path.lastIndexOf('/'));
+                      const dirPath = getDirectoryPath(ref.path);
                       onChange(dirPath);
                     }
                   }
@@ -439,7 +476,7 @@ function ParameterInput({
                 <option value="">Select bundled references...</option>
                 {bundledRefs.slice(0, 1).map((ref) => (
                   <option key={ref.id} value={ref.id}>
-                    Bundled: {ref.path.substring(0, ref.path.lastIndexOf('/'))}
+                    Bundled: {getDirectoryPath(ref.path)}
                   </option>
                 ))}
               </select>
