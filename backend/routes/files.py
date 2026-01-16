@@ -2,11 +2,17 @@
 
 import os
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File
 
 from backend.models.core import FileInfo, DirectoryListing
+
+# Uploads directory - create in a known location
+UPLOADS_DIR = Path(__file__).parent.parent.parent / "uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
 
 router = APIRouter()
 
@@ -230,3 +236,119 @@ async def find_spectrum_directories(
     search(root_path, 0)
 
     return {"root": str(root_path), "directories": spectrum_dirs}
+
+
+@router.post("/upload")
+async def upload_spectra_files(
+    files: List[UploadFile] = File(..., description="Spectrum files to upload"),
+):
+    """Upload spectrum files via drag-and-drop.
+
+    Accepts one or more .txt spectrum files and stores them in the uploads directory.
+    Returns the paths to the uploaded files.
+    """
+    uploaded = []
+    errors = []
+
+    for file in files:
+        if not file.filename:
+            errors.append("File has no filename")
+            continue
+
+        # Validate file extension
+        if not file.filename.lower().endswith(".txt"):
+            errors.append(f"Invalid file type: {file.filename}. Only .txt files are supported.")
+            continue
+
+        # Create destination path
+        dest_path = UPLOADS_DIR / file.filename
+
+        # Handle filename conflicts by appending a number
+        counter = 1
+        original_stem = dest_path.stem
+        while dest_path.exists():
+            dest_path = UPLOADS_DIR / f"{original_stem}_{counter}{dest_path.suffix}"
+            counter += 1
+
+        try:
+            # Save the file
+            with open(dest_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+
+            # Basic validation: check if it looks like a spectrum file
+            content = dest_path.read_text(encoding="utf-8", errors="ignore")
+            lines = content.strip().split("\n")
+
+            # Check for at least some numeric data (wavelength/intensity pairs)
+            data_lines = 0
+            for line in lines:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    try:
+                        float(parts[0])
+                        float(parts[1])
+                        data_lines += 1
+                    except ValueError:
+                        continue
+
+            if data_lines < 2:
+                # File doesn't look like valid spectrum data
+                dest_path.unlink()
+                errors.append(f"{file.filename}: File does not appear to contain valid spectrum data (expected wavelength/intensity pairs)")
+                continue
+
+            uploaded.append({
+                "filename": dest_path.name,
+                "path": str(dest_path.resolve()),
+                "size": dest_path.stat().st_size,
+                "data_points": data_lines,
+            })
+
+        except Exception as e:
+            errors.append(f"{file.filename}: Upload failed - {str(e)}")
+            # Clean up partial file if it exists
+            if dest_path.exists():
+                dest_path.unlink()
+
+    if not uploaded and errors:
+        raise HTTPException(status_code=400, detail="; ".join(errors))
+
+    return {
+        "uploaded": uploaded,
+        "errors": errors,
+        "upload_directory": str(UPLOADS_DIR.resolve()),
+    }
+
+
+@router.get("/uploads")
+async def list_uploaded_files():
+    """List all uploaded spectrum files."""
+    files = []
+    for path in UPLOADS_DIR.glob("*.txt"):
+        files.append(_get_file_info(path))
+
+    files.sort(key=lambda f: f.name.lower())
+
+    return {
+        "path": str(UPLOADS_DIR.resolve()),
+        "files": files,
+    }
+
+
+@router.delete("/uploads/{filename}")
+async def delete_uploaded_file(filename: str):
+    """Delete an uploaded file."""
+    file_path = UPLOADS_DIR / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=400, detail=f"Not a file: {filename}")
+
+    # Ensure we're not deleting something outside uploads dir
+    if not file_path.resolve().is_relative_to(UPLOADS_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    file_path.unlink()
+    return {"deleted": filename, "path": str(file_path)}

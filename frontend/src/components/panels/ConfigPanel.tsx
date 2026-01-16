@@ -2,6 +2,7 @@
 
 import { usePipelineStore } from '../../store';
 import type { ConfigField } from '../../types';
+import { SpectraDropZone } from '../common/SpectraDropZone';
 
 export function ConfigPanel() {
   const selectedNodeId = usePipelineStore((s) => s.selectedNodeId);
@@ -153,12 +154,15 @@ function ConfigFieldInput({
       )}
 
       {(field.type === 'file' || field.type === 'directory') && (
-        <input
-          type="text"
+        <SpectraDropZone
           value={(value as string) || ''}
-          onChange={(e) => onChange(e.target.value)}
-          className={inputClasses}
-          placeholder={`Enter ${field.type} path...`}
+          onChange={onChange}
+          mode={field.type}
+          placeholder={
+            field.type === 'file'
+              ? 'Drop spectrum file here or click to upload'
+              : 'Drop spectrum files here or click to upload'
+          }
         />
       )}
     </div>

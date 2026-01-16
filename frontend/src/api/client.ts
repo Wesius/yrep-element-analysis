@@ -207,6 +207,21 @@ export const visualizationsAPI = {
     }>('/visualizations/plot-options'),
 };
 
+/** Uploaded file info from the server */
+export interface UploadedFile {
+  filename: string;
+  path: string;
+  size: number;
+  data_points: number;
+}
+
+/** Upload response from the server */
+export interface UploadResponse {
+  uploaded: UploadedFile[];
+  errors: string[];
+  upload_directory: string;
+}
+
 /** Files API */
 export const filesAPI = {
   list: (path: string, pattern?: string) => {
@@ -254,4 +269,44 @@ export const filesAPI = {
       }>;
     }>(`/files/spectrum-dirs?${params}`);
   },
+
+  /** Upload spectrum files via drag-and-drop */
+  upload: async (files: File[]): Promise<UploadResponse> => {
+    const formData = new FormData();
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+
+    const response = await fetch(`${API_BASE}/files/upload`, {
+      method: 'POST',
+      body: formData,
+      // Don't set Content-Type - browser will set it with boundary for multipart
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+
+    return response.json();
+  },
+
+  /** List uploaded spectrum files */
+  listUploaded: () =>
+    fetchAPI<{
+      path: string;
+      files: Array<{
+        name: string;
+        path: string;
+        size: number;
+        is_dir: boolean;
+        extension: string | null;
+      }>;
+    }>('/files/uploads'),
+
+  /** Delete an uploaded file */
+  deleteUploaded: (filename: string) =>
+    fetchAPI<{ deleted: string; path: string }>(`/files/uploads/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+    }),
 };

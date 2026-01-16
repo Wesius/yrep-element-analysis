@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { presetsAPI, referencesAPI } from '../../api/client';
 import type { Preset, PresetParameter, BundledReference } from '../../types';
 import { usePipelineStore, useUIStore } from '../../store';
+import { SpectraDropZone } from '../common/SpectraDropZone';
 
 /** Icon mapping for preset categories */
 const presetIcons: Record<string, string> = {
@@ -395,17 +396,25 @@ function ParameterInput({
         </label>
       )}
 
-      {(parameter.type === 'string' || parameter.type === 'file' || parameter.type === 'directory') && (
+      {parameter.type === 'string' && (
+        <input
+          type="text"
+          value={(value as string) || ''}
+          onChange={(e) => onChange(e.target.value)}
+          className={inputClasses}
+        />
+      )}
+
+      {(parameter.type === 'file' || parameter.type === 'directory') && (
         <>
-          <input
-            type="text"
+          <SpectraDropZone
             value={(value as string) || ''}
-            onChange={(e) => onChange(e.target.value)}
-            className={inputClasses}
+            onChange={onChange}
+            mode={parameter.type}
             placeholder={
-              parameter.type === 'file' ? 'Enter file path...' :
-              parameter.type === 'directory' ? 'Enter directory path...' :
-              ''
+              parameter.type === 'file'
+                ? 'Drop spectrum file here or click to upload'
+                : 'Drop spectrum files here or click to upload'
             }
           />
 
