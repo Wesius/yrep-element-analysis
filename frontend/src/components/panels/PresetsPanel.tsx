@@ -166,7 +166,7 @@ export function PresetsPanel() {
   );
 }
 
-/** Individual preset card - clicking builds graph on canvas */
+/** Individual preset card - clicking anywhere builds graph on canvas */
 function PresetCard({
   preset,
   onBuild,
@@ -179,10 +179,29 @@ function PresetCard({
   isBuilding: boolean;
 }) {
   return (
-    <div className="w-full p-3 bg-slate-700 rounded-lg">
+    <div
+      onClick={isBuilding ? undefined : onBuild}
+      className={`
+        w-full p-3 bg-slate-700 rounded-lg transition-colors
+        ${isBuilding ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:bg-slate-600'}
+      `}
+    >
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
-          <h4 className="font-medium text-slate-100">{preset.name}</h4>
+          <div className="flex items-center justify-between">
+            <h4 className="font-medium text-slate-100">{preset.name}</h4>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onConfigure();
+              }}
+              disabled={isBuilding}
+              className="px-2 py-1 text-sm text-slate-400 hover:text-white hover:bg-slate-500 rounded transition-colors"
+              title="Configure parameters"
+            >
+              Configure
+            </button>
+          </div>
           <p className="text-xs text-slate-400 mt-1 line-clamp-2">
             {preset.description}
           </p>
@@ -196,30 +215,9 @@ function PresetCard({
               </span>
             ))}
           </div>
-          {/* Action buttons */}
-          <div className="flex gap-2 mt-3">
-            <button
-              onClick={onBuild}
-              disabled={isBuilding}
-              className={`
-                flex-1 px-3 py-1.5 text-sm font-medium rounded transition-colors
-                ${isBuilding
-                  ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-500 text-white'
-                }
-              `}
-            >
-              {isBuilding ? 'Building...' : 'Build Graph'}
-            </button>
-            <button
-              onClick={onConfigure}
-              disabled={isBuilding}
-              className="px-3 py-1.5 text-sm text-slate-300 hover:text-white hover:bg-slate-600 rounded transition-colors"
-              title="Configure parameters"
-            >
-              ⚙️
-            </button>
-          </div>
+          {isBuilding && (
+            <p className="text-xs text-blue-400 mt-2">Building graph...</p>
+          )}
         </div>
       </div>
     </div>
