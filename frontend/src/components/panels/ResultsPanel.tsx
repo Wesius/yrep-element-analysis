@@ -51,21 +51,31 @@ export function ResultsPanel() {
 
       {/* Results list */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {executionResult.execution_order.map((nodeId, index) => {
-          const nodeResult = executionResult.node_results[nodeId];
-          const node = nodes.find((n) => n.id === nodeId);
-          const nodeName = node?.data.title || nodeId;
+        {(!executionResult.execution_order || executionResult.execution_order.length === 0) ? (
+          <div className="text-slate-400 text-center py-4">
+            <p className="text-sm">No nodes were executed</p>
+          </div>
+        ) : (
+          executionResult.execution_order.map((nodeId, index) => {
+            const nodeResult = executionResult.node_results[nodeId];
+            // Skip if nodeResult is missing (shouldn't happen, but handle gracefully)
+            if (!nodeResult) {
+              return null;
+            }
+            const node = nodes.find((n) => n.id === nodeId);
+            const nodeName = node?.data.title || nodeId;
 
-          return (
-            <NodeResultCard
-              key={nodeId}
-              nodeId={nodeId}
-              nodeName={nodeName}
-              result={nodeResult}
-              index={index}
-            />
-          );
-        })}
+            return (
+              <NodeResultCard
+                key={nodeId}
+                nodeId={nodeId}
+                nodeName={nodeName}
+                result={nodeResult}
+                index={index}
+              />
+            );
+          })
+        )}
       </div>
 
       {/* Summary */}
@@ -170,15 +180,18 @@ function ResultOutput({ output }: { output: unknown }) {
 
   // Check for signal data
   if (isSignalData(output)) {
+    const wavelengthCount = output.wavelength.length;
+    // Handle empty array case to avoid Math.min/max crash
+    const rangeText = wavelengthCount > 0
+      ? `Range: ${Math.min(...output.wavelength).toFixed(1)} - ${Math.max(...output.wavelength).toFixed(1)} nm`
+      : 'No wavelength data';
+
     return (
       <div className="mt-2">
         <p className="text-xs text-slate-400">
-          Signal: {output.wavelength.length} data points
+          Signal: {wavelengthCount} data points
         </p>
-        <p className="text-xs text-slate-500">
-          Range: {Math.min(...output.wavelength).toFixed(1)} -{' '}
-          {Math.max(...output.wavelength).toFixed(1)} nm
-        </p>
+        <p className="text-xs text-slate-500">{rangeText}</p>
       </div>
     );
   }

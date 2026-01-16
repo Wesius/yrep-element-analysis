@@ -103,13 +103,20 @@ export function PresetsPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {presets.map((preset) => (
-          <PresetCard
-            key={preset.id}
-            preset={preset}
-            onSelect={() => setSelectedPreset(preset)}
-          />
-        ))}
+        {presets.length === 0 ? (
+          <div className="text-slate-400 text-center py-8">
+            <p className="mb-2">No presets available</p>
+            <p className="text-sm">Check your backend configuration</p>
+          </div>
+        ) : (
+          presets.map((preset) => (
+            <PresetCard
+              key={preset.id}
+              preset={preset}
+              onSelect={() => setSelectedPreset(preset)}
+            />
+          ))
+        )}
       </div>
     </div>
   );
@@ -369,8 +376,14 @@ function PresetParameterForm({
         </button>
         <button
           onClick={handleBuildPipeline}
-          disabled={validating}
-          className="w-full px-4 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors"
+          disabled={validating || executing}
+          className={`
+            w-full px-4 py-2 text-sm rounded transition-colors
+            ${validating || executing
+              ? 'text-slate-500 cursor-not-allowed'
+              : 'text-slate-300 hover:text-white hover:bg-slate-700'
+            }
+          `}
         >
           Build Pipeline (Edit First)
         </button>
@@ -474,9 +487,9 @@ function ParameterInput({
                 defaultValue=""
               >
                 <option value="">Select bundled references...</option>
-                {bundledRefs.slice(0, 1).map((ref) => (
+                {bundledRefs.map((ref) => (
                   <option key={ref.id} value={ref.id}>
-                    Bundled: {getDirectoryPath(ref.path)}
+                    {ref.name}
                   </option>
                 ))}
               </select>

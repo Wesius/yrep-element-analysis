@@ -59,17 +59,18 @@ export function NodePalette() {
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  // Filter nodes by search query
+  // Filter nodes by search query (trimmed)
+  const trimmedQuery = searchQuery.trim().toLowerCase();
   const filteredGroups = Object.entries(groupedNodes).reduce(
     (acc, [category, nodes]) => {
-      if (!searchQuery) {
+      if (!trimmedQuery) {
         acc[category] = nodes;
       } else {
         const filtered = nodes.filter(
           (n) =>
-            n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            n.identifier.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            n.description.toLowerCase().includes(searchQuery.toLowerCase())
+            n.title.toLowerCase().includes(trimmedQuery) ||
+            n.identifier.toLowerCase().includes(trimmedQuery) ||
+            (n.description?.toLowerCase() || '').includes(trimmedQuery)
         );
         if (filtered.length > 0) {
           acc[category] = filtered;
@@ -79,6 +80,8 @@ export function NodePalette() {
     },
     {} as Record<string, NodeDefinition[]>
   );
+
+  const hasResults = Object.keys(filteredGroups).length > 0;
 
   if (loading) {
     return (
@@ -103,45 +106,52 @@ export function NodePalette() {
 
       {/* Node categories */}
       <div className="flex-1 overflow-y-auto">
-        {Object.entries(filteredGroups).map(([category, nodes]) => (
-          <div key={category} className="border-b border-slate-700">
-            {/* Category header */}
-            <button
-              onClick={() => toggleCategory(category)}
-              className="w-full px-3 py-2 flex items-center justify-between hover:bg-slate-700 transition-colors"
-            >
-              <span className="flex items-center gap-2 text-sm font-medium text-slate-200">
-                <span>{categoryIcons[category] || '📦'}</span>
-                {category}
-                <span className="text-xs text-slate-400">({nodes.length})</span>
-              </span>
-              <span className="text-slate-400">
-                {expandedCategories.has(category) ? '▼' : '▶'}
-              </span>
-            </button>
-
-            {/* Nodes in category */}
-            {expandedCategories.has(category) && (
-              <div className="pb-2">
-                {nodes.map((node) => (
-                  <div
-                    key={node.identifier}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, node)}
-                    className="mx-2 my-1 px-3 py-2 bg-slate-700 rounded cursor-grab hover:bg-slate-600 transition-colors"
-                  >
-                    <div className="text-sm font-medium text-slate-100">
-                      {node.title}
-                    </div>
-                    <div className="text-xs text-slate-400 truncate">
-                      {node.description}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+        {!hasResults ? (
+          <div className="p-4 text-slate-400 text-center">
+            <p className="mb-2">No nodes found</p>
+            <p className="text-sm">Try a different search term</p>
           </div>
-        ))}
+        ) : (
+          Object.entries(filteredGroups).map(([category, nodes]) => (
+            <div key={category} className="border-b border-slate-700">
+              {/* Category header */}
+              <button
+                onClick={() => toggleCategory(category)}
+                className="w-full px-3 py-2 flex items-center justify-between hover:bg-slate-700 transition-colors"
+              >
+                <span className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <span>{categoryIcons[category] || '📦'}</span>
+                  {category}
+                  <span className="text-xs text-slate-400">({nodes.length})</span>
+                </span>
+                <span className="text-slate-400">
+                  {expandedCategories.has(category) ? '▼' : '▶'}
+                </span>
+              </button>
+
+              {/* Nodes in category */}
+              {expandedCategories.has(category) && (
+                <div className="pb-2">
+                  {nodes.map((node) => (
+                    <div
+                      key={node.identifier}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, node)}
+                      className="mx-2 my-1 px-3 py-2 bg-slate-700 rounded cursor-grab hover:bg-slate-600 transition-colors"
+                    >
+                      <div className="text-sm font-medium text-slate-100">
+                        {node.title}
+                      </div>
+                      <div className="text-xs text-slate-400 truncate">
+                        {node.description || 'No description'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))
+        )}
       </div>
 
       {/* Help text */}

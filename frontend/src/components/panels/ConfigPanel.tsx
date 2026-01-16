@@ -113,30 +113,45 @@ function ConfigFieldInput({
         />
       )}
 
-      {field.type === 'number' && (
-        <input
-          type="number"
-          value={(value as number) ?? ''}
-          onChange={(e) => onChange(e.target.valueAsNumber)}
-          className={inputClasses}
-          placeholder={String(field.default ?? '')}
-          step="any"
-        />
-      )}
-
-      {field.type === 'boolean' && (
-        <label className="flex items-center gap-2 cursor-pointer">
+      {field.type === 'number' && (() => {
+        // Handle NaN/undefined to show empty string instead of "NaN"
+        const numValue = value as number | undefined | null;
+        const displayValue = numValue === undefined || numValue === null || Number.isNaN(numValue)
+          ? ''
+          : String(numValue);
+        return (
           <input
-            type="checkbox"
-            checked={Boolean(value)}
-            onChange={(e) => onChange(e.target.checked)}
-            className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500"
+            type="number"
+            value={displayValue}
+            onChange={(e) => {
+              const num = e.target.valueAsNumber;
+              // Pass undefined for empty/NaN to avoid storing NaN
+              onChange(Number.isNaN(num) ? undefined : num);
+            }}
+            className={inputClasses}
+            placeholder={String(field.default ?? '')}
+            step="any"
           />
-          <span className="text-sm text-slate-300">
-            {value ? 'Enabled' : 'Disabled'}
-          </span>
-        </label>
-      )}
+        );
+      })()}
+
+      {field.type === 'boolean' && (() => {
+        // Handle string 'false'/'true' values from API
+        const boolValue = value === 'false' ? false : value === 'true' ? true : Boolean(value);
+        return (
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={boolValue}
+              onChange={(e) => onChange(e.target.checked)}
+              className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500"
+            />
+            <span className="text-sm text-slate-300">
+              {boolValue ? 'Enabled' : 'Disabled'}
+            </span>
+          </label>
+        );
+      })()}
 
       {field.type === 'select' && field.options && (
         <select
