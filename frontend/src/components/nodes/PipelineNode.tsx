@@ -9,7 +9,7 @@ import { usePipelineStore, useUIStore } from '../../store';
 const categoryColors: Record<string, string> = {
   'I/O': 'bg-emerald-600',
   'Preprocess': 'bg-blue-600',
-  'Detection': 'bg-purple-600',
+  'Detection': 'bg-cyan-600',
   'Utilities': 'bg-amber-600',
   'default': 'bg-slate-600',
 };

@@ -84,7 +84,7 @@ export function Header() {
     <header className="h-14 bg-slate-800 border-b border-slate-700 px-4 flex items-center justify-between">
       {/* Logo and title */}
       <div className="flex items-center gap-3">
-        <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center text-white font-bold">
+        <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-slate-600 rounded-lg flex items-center justify-center text-white font-bold">
           Y
         </div>
         <div>
