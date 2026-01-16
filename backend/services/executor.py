@@ -63,11 +63,36 @@ class ExecutionContext:
         self.logs.append(message)
 
     def resolve_path(self, path_str: str) -> Path:
-        """Resolve a path relative to workspace root."""
+        """Resolve a path relative to workspace root.
+
+        All paths are resolved relative to workspace_root. Absolute paths
+        and path traversal attempts are rejected for security.
+        """
+        # Reject empty paths
+        if not path_str or not path_str.strip():
+            raise ExecutionError("Empty path provided")
+
         path = Path(path_str).expanduser()
-        if not path.is_absolute():
-            path = (self.workspace_root / path).resolve()
-        return path
+
+        # Always resolve relative to workspace_root for security
+        if path.is_absolute():
+            resolved = path.resolve()
+        else:
+            resolved = (self.workspace_root / path).resolve()
+
+        # Validate the resolved path stays within workspace_root
+        workspace_resolved = self.workspace_root.resolve()
+        try:
+            if not (resolved == workspace_resolved or resolved.is_relative_to(workspace_resolved)):
+                raise ExecutionError(
+                    f"Path escapes workspace boundary: {path_str}"
+                )
+        except ValueError:
+            raise ExecutionError(
+                f"Path escapes workspace boundary: {path_str}"
+            )
+
+        return resolved
 
 
 class PipelineExecutor:

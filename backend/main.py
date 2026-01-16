@@ -1,9 +1,31 @@
 """YREP Spectral Analysis API - FastAPI application."""
 
+import os
+from typing import List
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.routes import export, files, nodes, pipelines, presets, references, visualizations
+
+
+def _get_cors_origins() -> List[str]:
+    """Get allowed CORS origins from environment or defaults.
+
+    Configure via YREP_CORS_ORIGINS environment variable (comma-separated).
+    """
+    env_origins = os.environ.get("YREP_CORS_ORIGINS", "")
+    if env_origins:
+        return [origin.strip() for origin in env_origins.split(",") if origin.strip()]
+
+    # Default: allow localhost development servers
+    return [
+        "http://localhost:5173",  # Vite default
+        "http://localhost:3000",  # Common React default
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
+
 
 app = FastAPI(
     title="YREP Spectral Analysis API",
@@ -11,13 +33,14 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Configure CORS for frontend access
+# Configure CORS for frontend access with explicit origins
+# Using wildcard with credentials is insecure and rejected by browsers
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to specific origins
+    allow_origins=_get_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
 
 # Register route modules

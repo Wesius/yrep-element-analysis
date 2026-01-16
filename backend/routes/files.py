@@ -1,12 +1,95 @@
 """File browser API routes."""
 
+import os
+import re
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from backend.models.core import FileInfo, DirectoryListing
 
 router = APIRouter()
+
+
+# Allowed base directories for file browsing
+# In production, configure via environment variable
+_ALLOWED_BASE_DIRS: List[Path] = []
+
+
+def _get_allowed_dirs() -> List[Path]:
+    """Get list of allowed base directories."""
+    if _ALLOWED_BASE_DIRS:
+        return _ALLOWED_BASE_DIRS
+
+    # Default: user's home directory and common data locations
+    allowed = [
+        Path.home(),
+        Path("/tmp"),
+    ]
+
+    # Allow override via environment variable (colon-separated paths)
+    env_dirs = os.environ.get("YREP_ALLOWED_DIRS", "")
+    if env_dirs:
+        allowed = [Path(p).resolve() for p in env_dirs.split(":") if p]
+
+    return [d.resolve() for d in allowed if d.exists()]
+
+
+def _validate_path(path: Path) -> None:
+    """Validate that a path is within allowed directories.
+
+    Raises HTTPException if path is outside allowed boundaries.
+    """
+    resolved = path.resolve()
+    allowed_dirs = _get_allowed_dirs()
+
+    for allowed in allowed_dirs:
+        try:
+            if resolved == allowed or resolved.is_relative_to(allowed):
+                return
+        except ValueError:
+            continue
+
+    raise HTTPException(
+        status_code=403,
+        detail=f"Access denied: path is outside allowed directories",
+    )
+
+
+def _sanitize_glob_pattern(pattern: str) -> str:
+    """Sanitize a glob pattern to prevent path traversal.
+
+    Raises HTTPException if pattern is dangerous.
+    """
+    # Reject patterns with path traversal
+    if ".." in pattern:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid pattern: path traversal not allowed",
+        )
+
+    # Reject absolute paths in pattern
+    if pattern.startswith("/") or pattern.startswith("\\"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid pattern: absolute paths not allowed",
+        )
+
+    # Reject overly broad recursive patterns at the start
+    if pattern.startswith("**"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid pattern: recursive wildcard at start not allowed",
+        )
+
+    # Only allow simple glob patterns (alphanumeric, *, ?, [], .)
+    if not re.match(r'^[\w\s.*?\[\]\-_]+$', pattern):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid pattern: contains disallowed characters",
+        )
+
+    return pattern
 
 
 def _get_file_info(path: Path) -> FileInfo:
@@ -36,6 +119,9 @@ async def list_directory(
     """
     dir_path = Path(path).expanduser().resolve()
 
+    # Validate path is within allowed directories
+    _validate_path(dir_path)
+
     if not dir_path.exists():
         raise HTTPException(status_code=404, detail=f"Path not found: {path}")
 
@@ -44,7 +130,9 @@ async def list_directory(
 
     try:
         if pattern:
-            items = list(dir_path.glob(pattern))
+            # Sanitize glob pattern before use
+            safe_pattern = _sanitize_glob_pattern(pattern)
+            items = list(dir_path.glob(safe_pattern))
         else:
             items = list(dir_path.iterdir())
 
@@ -73,6 +161,9 @@ async def get_file_info(
     """Get information about a file or directory."""
     file_path = Path(path).expanduser().resolve()
 
+    # Validate path is within allowed directories
+    _validate_path(file_path)
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Path not found: {path}")
 
@@ -85,6 +176,10 @@ async def check_exists(
 ):
     """Check if a path exists."""
     file_path = Path(path).expanduser().resolve()
+
+    # Validate path is within allowed directories
+    _validate_path(file_path)
+
     return {
         "path": str(file_path),
         "exists": file_path.exists(),
@@ -96,7 +191,7 @@ async def check_exists(
 @router.get("/spectrum-dirs")
 async def find_spectrum_directories(
     root: str = Query(..., description="Root directory to search"),
-    max_depth: int = Query(3, description="Maximum search depth"),
+    max_depth: int = Query(3, ge=1, le=5, description="Maximum search depth (1-5)"),
 ):
     """Find directories containing spectrum files.
 
@@ -104,6 +199,9 @@ async def find_spectrum_directories(
     Useful for discovering data directories.
     """
     root_path = Path(root).expanduser().resolve()
+
+    # Validate path is within allowed directories
+    _validate_path(root_path)
 
     if not root_path.exists() or not root_path.is_dir():
         raise HTTPException(status_code=404, detail=f"Root directory not found: {root}")

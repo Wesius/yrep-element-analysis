@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import re
 from datetime import datetime
 from typing import List
 
@@ -19,11 +20,42 @@ from backend.models.core import (
 router = APIRouter()
 
 
+def _sanitize_filename(filename: str) -> str:
+    """Sanitize a filename to prevent injection attacks.
+
+    Removes path separators, control characters, and other dangerous chars.
+    Only allows alphanumeric, underscore, hyphen, and period.
+    """
+    if not filename:
+        return "export"
+
+    # Remove any path components
+    filename = filename.replace("/", "").replace("\\", "")
+
+    # Remove control characters and newlines
+    filename = re.sub(r'[\x00-\x1f\x7f]', '', filename)
+
+    # Remove quotes and other special chars that could break headers
+    filename = re.sub(r'["\'\`<>|:;]', '', filename)
+
+    # Only keep safe characters
+    filename = re.sub(r'[^\w\-.]', '_', filename)
+
+    # Remove leading/trailing dots and spaces
+    filename = filename.strip('. ')
+
+    # Limit length
+    if len(filename) > 100:
+        filename = filename[:100]
+
+    return filename or "export"
+
+
 def _generate_filename(base: str | None, format: ExportFormat) -> str:
-    """Generate a filename with timestamp."""
+    """Generate a sanitized filename with timestamp."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base = base or "detection_results"
-    return f"{base}_{timestamp}.{format.value}"
+    safe_base = _sanitize_filename(base) if base else "detection_results"
+    return f"{safe_base}_{timestamp}.{format.value}"
 
 
 def _result_to_csv(result: DetectionResult, include_signal: bool) -> str:
