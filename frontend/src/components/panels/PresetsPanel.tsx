@@ -32,6 +32,7 @@ export function PresetsPanel() {
   const [buildingPreset, setBuildingPreset] = useState<string | null>(null);
 
   const loadPipeline = usePipelineStore((s) => s.loadPipeline);
+  const nodeDefinitions = usePipelineStore((s) => s.nodeDefinitions);
   const setActivePanel = useUIStore((s) => s.setActivePanel);
 
   // Load presets on mount
@@ -75,19 +76,23 @@ export function PresetsPanel() {
       const pipeline = await presetsAPI.buildPipeline(preset.id, defaults);
 
       // Convert API pipeline to React Flow nodes/edges
-      const nodes = pipeline.nodes.map((n, i) => ({
-        id: n.id,
-        type: 'pipeline',
-        position: n.position || { x: 200 * (i % 3), y: 150 * Math.floor(i / 3) },
-        data: {
-          identifier: n.identifier,
-          title: n.identifier.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-          category: 'Preset',
-          config: n.config,
-          inputs: [],
-          outputs: [],
-        },
-      }));
+      const nodes = pipeline.nodes.map((n, i) => {
+        // Look up the node definition to get inputs/outputs
+        const nodeDef = nodeDefinitions.find((def) => def.identifier === n.identifier);
+        return {
+          id: n.id,
+          type: 'pipeline',
+          position: n.position || { x: 200 * (i % 3), y: 150 * Math.floor(i / 3) },
+          data: {
+            identifier: n.identifier,
+            title: nodeDef?.title || n.identifier.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+            category: nodeDef?.category || 'Preset',
+            config: n.config,
+            inputs: nodeDef?.inputs || [],
+            outputs: nodeDef?.outputs || [],
+          },
+        };
+      });
 
       const edges = pipeline.edges.map((e) => ({
         id: e.id,
@@ -246,6 +251,7 @@ function PresetParameterForm({
   const [errors, setErrors] = useState<string[]>([]);
 
   const loadPipeline = usePipelineStore((s) => s.loadPipeline);
+  const nodeDefinitions = usePipelineStore((s) => s.nodeDefinitions);
   const setExecutionResult = usePipelineStore((s) => s.setExecutionResult);
   const setActivePanel = useUIStore((s) => s.setActivePanel);
 
@@ -302,19 +308,23 @@ function PresetParameterForm({
       const pipeline = await presetsAPI.buildPipeline(preset.id, parameters);
 
       // Convert API pipeline to React Flow nodes/edges
-      const nodes = pipeline.nodes.map((n, i) => ({
-        id: n.id,
-        type: 'pipeline',
-        position: n.position || { x: 200 * (i % 3), y: 150 * Math.floor(i / 3) },
-        data: {
-          identifier: n.identifier,
-          title: n.identifier.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-          category: 'Preset',
-          config: n.config,
-          inputs: [],
-          outputs: [],
-        },
-      }));
+      const nodes = pipeline.nodes.map((n, i) => {
+        // Look up the node definition to get inputs/outputs
+        const nodeDef = nodeDefinitions.find((def) => def.identifier === n.identifier);
+        return {
+          id: n.id,
+          type: 'pipeline',
+          position: n.position || { x: 200 * (i % 3), y: 150 * Math.floor(i / 3) },
+          data: {
+            identifier: n.identifier,
+            title: nodeDef?.title || n.identifier.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+            category: nodeDef?.category || 'Preset',
+            config: n.config,
+            inputs: nodeDef?.inputs || [],
+            outputs: nodeDef?.outputs || [],
+          },
+        };
+      });
 
       const edges = pipeline.edges.map((e) => ({
         id: e.id,
