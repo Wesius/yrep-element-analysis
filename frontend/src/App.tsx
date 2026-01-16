@@ -4,6 +4,7 @@ import { ReactFlowProvider } from '@xyflow/react';
 import { Header } from './components/layout/Header';
 import { Canvas } from './components/layout/Canvas';
 import { Sidebar } from './components/layout/Sidebar';
+import { HelpModal, Notification } from './components/ui';
 
 function App() {
   return (
@@ -14,6 +15,8 @@ function App() {
           <Canvas />
           <Sidebar />
         </main>
+        <HelpModal />
+        <Notification />
       </div>
     </ReactFlowProvider>
   );
