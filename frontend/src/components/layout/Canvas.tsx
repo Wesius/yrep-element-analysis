@@ -111,7 +111,7 @@ function CanvasInner() {
         case 'Preprocess':
           return '#3b82f6';
         case 'Detection':
-          return '#8b5cf6';
+          return '#06b6d4';
         case 'Utilities':
           return '#f59e0b';
         default:

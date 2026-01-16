@@ -5,14 +5,6 @@ import { usePipelineStore } from '../../store';
 import { nodesAPI } from '../../api/client';
 import type { NodeDefinition } from '../../types';
 
-/** Category icon mapping */
-const categoryIcons: Record<string, string> = {
-  'I/O': '📁',
-  'Preprocess': '⚙️',
-  'Detection': '🔍',
-  'Utilities': '🛠️',
-};
-
 export function NodePalette() {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
@@ -120,7 +112,6 @@ export function NodePalette() {
                 className="w-full px-3 py-2 flex items-center justify-between hover:bg-slate-700 transition-colors"
               >
                 <span className="flex items-center gap-2 text-sm font-medium text-slate-200">
-                  <span>{categoryIcons[category] || '📦'}</span>
                   {category}
                   <span className="text-xs text-slate-400">({nodes.length})</span>
                 </span>

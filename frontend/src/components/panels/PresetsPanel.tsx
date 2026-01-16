@@ -23,13 +23,6 @@ function getDirectoryPath(filePath: string): string {
   return filePath.substring(0, lastSlash);
 }
 
-/** Icon mapping for preset categories */
-const presetIcons: Record<string, string> = {
-  Detection: '🔍',
-  Processing: '⚙️',
-  Analysis: '📊',
-  default: '📋',
-};
 
 export function PresetsPanel() {
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -185,12 +178,9 @@ function PresetCard({
   onConfigure: () => void;
   isBuilding: boolean;
 }) {
-  const icon = presetIcons[preset.category] || presetIcons.default;
-
   return (
     <div className="w-full p-3 bg-slate-700 rounded-lg">
       <div className="flex items-start gap-3">
-        <span className="text-2xl">{icon}</span>
         <div className="flex-1 min-w-0">
           <h4 className="font-medium text-slate-100">{preset.name}</h4>
           <p className="text-xs text-slate-400 mt-1 line-clamp-2">

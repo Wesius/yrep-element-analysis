@@ -150,7 +150,7 @@ def plot_pca_scatter(
 ):
     """Plot PC1 vs PC2 scatter plot."""
     plt.figure(figsize=(8, 6))
-    plt.scatter(scores[:, 0], scores[:, 1], alpha=0.7, c='tab:purple', edgecolor='k')
+    plt.scatter(scores[:, 0], scores[:, 1], alpha=0.7, c='tab:cyan', edgecolor='k')
     plt.xlabel("PC1 (Matrix/Background)")
     plt.ylabel("PC2 (Variation)")
     plt.title(f"PCA Score Plot (PC1 vs PC2) - {dataset_name}")

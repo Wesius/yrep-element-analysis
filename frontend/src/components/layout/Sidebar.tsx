@@ -7,10 +7,10 @@ import { PresetsPanel } from '../panels/PresetsPanel';
 import { ResultsPanel } from '../panels/ResultsPanel';
 
 const tabs = [
-  { id: 'nodes' as const, label: 'Nodes', icon: '📦' },
-  { id: 'config' as const, label: 'Config', icon: '⚙️' },
-  { id: 'presets' as const, label: 'Presets', icon: '📋' },
-  { id: 'results' as const, label: 'Results', icon: '📊' },
+  { id: 'nodes' as const, label: 'Nodes' },
+  { id: 'config' as const, label: 'Config' },
+  { id: 'presets' as const, label: 'Presets' },
+  { id: 'results' as const, label: 'Results' },
 ];
 
 export function Sidebar() {
@@ -33,8 +33,7 @@ export function Sidebar() {
               }
             `}
           >
-            <span className="block text-lg mb-1">{tab.icon}</span>
-            {tab.label}
+{tab.label}
           </button>
         ))}
       </div>
