@@ -21,6 +21,7 @@ from yrep_spectrum_analysis import (
 from yrep_spectrum_analysis.types import Signal
 from yrep_spectrum_analysis.utils import (
     expand_species_filter,
+    filter_degraded_signals,
     is_junk_group,
     load_references,
     load_txt_spectrum,
@@ -249,6 +250,10 @@ def main() -> None:
         PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
     results: list[ResultSummary] = []
+    skipped_cutoff = 0
+    skipped_junk = 0
+    total_runs = 0
+    kept_log: list[tuple[str, int, int]] = []
 
     # Iterate Datasets
     for ds_name, runs_dict in datasets_with_runs.items():
@@ -269,9 +274,25 @@ def main() -> None:
 
         # Iterate Runs
         for run_name, group_signals_list in runs_items:
-            junk, q_avg = describe_group(group_signals_list)
+            total_runs += 1
+            filtered = filter_degraded_signals(group_signals_list)
+            if not filtered:
+                print(f"  {run_name} has no usable signals after cutoff, skipping.")
+                skipped_cutoff += 1
+                continue
+            if len(filtered) < len(group_signals_list):
+                print(
+                    f"  {run_name}: using first {len(filtered)} of "
+                    f"{len(group_signals_list)} shots (degradation cutoff)."
+                )
+            if run_name != "AVG":
+                kept_log.append(
+                    (f"{ds_name}/{run_name}", len(group_signals_list), len(filtered))
+                )
+            junk, q_avg = describe_group(filtered)
             if junk:
                 print(f"  {run_name} is junk (quality={q_avg:.3f}), skipping.")
+                skipped_junk += 1
                 continue
 
             print(f"  Processing {run_name}...")
@@ -288,7 +309,7 @@ def main() -> None:
 
                 try:
                     detection, templates, r2 = run_pipeline(
-                        group_signals_list,
+                        filtered,
                         bg_files,
                         references,
                         species_filter,
@@ -356,6 +377,9 @@ def main() -> None:
                 bg_signals = backgrounds.get(bg_name)
                 if not run_signals or not bg_signals:
                     continue
+                filtered = filter_degraded_signals(run_signals)
+                if not filtered:
+                    continue
 
                 prefix = "BEST_" if (ds_name, run_name, bg_name) == (
                     best.dataset_name,
@@ -365,7 +389,7 @@ def main() -> None:
                 plot_prefix = PLOT_DIR / ds_name / run_name / bg_name / prefix
                 plot_prefix.parent.mkdir(parents=True, exist_ok=True)
                 run_pipeline(
-                    run_signals,
+                    filtered,
                     bg_signals,
                     references,
                     species_filter,
@@ -373,6 +397,22 @@ def main() -> None:
                 )
 
             print(f"Selected plots saved under {PLOT_DIR}")
+
+    print("\n" + "=" * 80)
+    print(
+        f"RUN FILTER SUMMARY: total={total_runs}, "
+        f"skipped_cutoff={skipped_cutoff}, skipped_junk={skipped_junk}"
+    )
+    print("=" * 80)
+
+    if kept_log:
+        kept_path = PLOT_DIR / "kept_runs.txt"
+        kept_path.parent.mkdir(parents=True, exist_ok=True)
+        with kept_path.open("w") as f:
+            f.write("run kept/total\n")
+            for run_name, total, kept in kept_log:
+                f.write(f"{run_name} {kept}/{total}\n")
+        print(f"Wrote kept-run log to {kept_path}")
 
 
 if __name__ == "__main__":

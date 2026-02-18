@@ -210,6 +210,68 @@ def signal_quality(signal: Signal) -> float:
     return float(np.clip(score, 0.0, 1.0))
 
 
+def _order_signals_by_file(signals: Sequence[Signal]) -> List[Signal]:
+    files = [str(s.meta.get("file", "")) for s in signals]
+    if all(files):
+        return sorted(signals, key=lambda s: str(s.meta.get("file", "")))
+    return list(signals)
+
+
+def filter_degraded_signals(
+    signals: Sequence[Signal],
+    *,
+    baseline_fraction: float = 0.2,
+    min_baseline: int = 5,
+    drop_fraction: float = 0.6,
+    consecutive: int = 3,
+    debug: bool = False,
+) -> List[Signal]:
+    """
+    Keep signals up to the first sustained quality drop, then stop.
+
+    Signals are evaluated in filename order (meta['file']) when available.
+    Uses signal_quality to find a baseline from the first portion of the run.
+    If quality drops below (drop_fraction * baseline_median) for `consecutive`
+    shots in a row, the run is truncated before that point.
+    """
+    if not signals:
+        return []
+    ordered = _order_signals_by_file(signals)
+    qualities = [signal_quality(s) for s in ordered]
+    n = len(qualities)
+    baseline_n = max(min_baseline, int(np.ceil(n * baseline_fraction)))
+    baseline_n = min(baseline_n, n)
+    baseline_vals = qualities[:baseline_n]
+    baseline_median = float(np.median(baseline_vals)) if baseline_vals else 0.0
+    threshold = baseline_median * drop_fraction
+
+    streak = 0
+    cutoff_idx = n
+    for idx in range(baseline_n, n):
+        if qualities[idx] < threshold:
+            streak += 1
+            if streak >= consecutive:
+                cutoff_idx = idx - consecutive + 1
+                break
+        else:
+            streak = 0
+
+    if debug:
+        cutoff_file = (
+            str(ordered[cutoff_idx].meta.get("file", ""))
+            if cutoff_idx < n
+            else ""
+        )
+        print(
+            "[degradation] n={} baseline_n={} baseline_median={:.3f} "
+            "threshold={:.3f} cutoff_idx={} cutoff_file={}".format(
+                n, baseline_n, baseline_median, threshold, cutoff_idx, cutoff_file
+            )
+        )
+
+    return ordered[:cutoff_idx]
+
+
 def is_junk_group(signals: Sequence[Signal], *, debug: bool = False) -> bool:
     if not signals:
         if debug:

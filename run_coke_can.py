@@ -21,6 +21,7 @@ from yrep_spectrum_analysis import (
 from yrep_spectrum_analysis.types import Signal
 from yrep_spectrum_analysis.utils import (
     expand_species_filter,
+    filter_degraded_signals,
     is_junk_group,
     load_references,
     load_txt_spectrum,
@@ -259,7 +260,16 @@ def main() -> None:
     results: list[ResultSummary] = []
 
     for run_name, group_signals_list in runs.items():
-        junk, q_avg = describe_group(group_signals_list)
+        filtered = filter_degraded_signals(group_signals_list)
+        if not filtered:
+            print(f"{run_name} has no usable signals after cutoff, skipping.")
+            continue
+        if len(filtered) < len(group_signals_list):
+            print(
+                f"{run_name}: using first {len(filtered)} of "
+                f"{len(group_signals_list)} shots (degradation cutoff)."
+            )
+        junk, q_avg = describe_group(filtered)
         if junk:
             print(f"{run_name} looks like junk (quality={q_avg:.3f}), skipping.")
             continue
@@ -277,7 +287,7 @@ def main() -> None:
 
             try:
                 detection, templates, r2 = run_pipeline(
-                    group_signals_list,
+                    filtered,
                     bg_files,
                     references,
                     species_filter,
@@ -360,10 +370,14 @@ def main() -> None:
     best_bg_signals = background_sets.get(best.bg_name)
 
     if best_run_signals and best_bg_signals:
+        best_filtered = filter_degraded_signals(best_run_signals)
+        if not best_filtered:
+            print("Could not reload data for best run to plot.")
+            return
         print("Re-running best configuration to generate plots...")
         plot_prefix = PLOT_DIR / f"BEST_{best.dataset_name}_{best.bg_name}"
         run_pipeline(
-            best_run_signals,
+            best_filtered,
             best_bg_signals,
             references,
             species_filter,

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Run the composable analysis pipeline on the Dec 3 mangroves datasets."""
+"""Run the composable analysis pipeline on SandLead datasets."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, NamedTuple
-import argparse
 
 from yrep_spectrum_analysis import (
     average_signals,
@@ -36,7 +35,7 @@ from yrep_spectrum_analysis.visualizations import (
 
 # Configuration
 VISUALIZE = True
-PLOT_DIR = Path(__file__).parent / "plots/mangroves_dec3"
+PLOT_DIR = Path(__file__).parent / "plots" / "sandlead"
 AVERAGE_POINTS = 1200
 RESAMPLE_POINTS = 1500
 TRIM_RANGE = (300.0, 800.0)
@@ -46,23 +45,19 @@ DETECT_PARAMS = {"presence_threshold": 0.00002, "min_bands": 3}
 INITIAL_FWHM = 0.75
 FWHM_SEARCH = {"enabled": True, "spread_nm": 0.2, "iterations": 3}
 
-# Elements expected in mangrove samples and KBr matrices.
-MANGROVE_ELEMENTS = [
+SANDLEAD_ELEMENTS = [
     "Al", "Si", "Fe", "Ca", "Mg", "K", "Na", "Ti", "Mn", "P", "S",
     "Zn", "Cu", "Cr", "Ni", "Pb", "Ba", "Sr", "V", "Co", "Mo",
-    "As", "Li", "Cd", "Br", "Cl",
+    "As", "Li", "Cd",
 ]
 
 
 class ResultSummary(NamedTuple):
     category: str
-    dataset_name: str
-    run_name: str
+    sample_name: str
+    bg_name: str
     r2: float
     detections: list[str]
-    detection_scores: list[tuple[str, float]]
-    top_fve: list[tuple[str, float]]
-    top_coeffs: list[tuple[str, float]]
     best_fwhm: float | None
 
 
@@ -83,22 +78,8 @@ def load_recursive(root: Path) -> list[Signal]:
     return signals
 
 
-def load_runs(root: Path) -> dict[str, list[Signal]]:
-    """Load spectra grouped by immediate subdirectories (Run_1, Run_2...)."""
-    runs: dict[str, list[Signal]] = {}
-    if not root.exists():
-        return runs
-
-    for path in sorted(root.iterdir()):
-        if path.is_dir():
-            signals = load_recursive(path)
-            if signals:
-                runs[path.name] = signals
-    return runs
-
-
 def describe_group(group: list[Signal]) -> tuple[bool, float]:
-    """Return junk status and group quality for the averaged signal."""
+    """Return junk status and quality."""
     junk = is_junk_group(group)
     try:
         avg = average_signals(group, n_points=AVERAGE_POINTS)
@@ -115,7 +96,7 @@ def run_pipeline(
     species_filter: list[str] | None,
     plot_path_prefix: Path | None = None,
 ) -> tuple[Any, Any, float]:
-    """Run the preprocessing + detection pipeline for one run/background."""
+    """Run the pipeline on a group of measurements + background."""
     signal = average_signals(measurements, n_points=AVERAGE_POINTS)
 
     background_signal = None
@@ -164,7 +145,6 @@ def run_pipeline(
             show=False,
         )
 
-    # Template matching and search
     templates = build_templates(
         processed,
         references=references,
@@ -196,12 +176,11 @@ def run_pipeline(
         spread_nm=SHIFT_PARAMS["spread_nm"],
         iterations=SHIFT_PARAMS["iterations"],
     )
-
     result = detect_nnls(
         processed,
         templates,
         presence_threshold=DETECT_PARAMS["presence_threshold"],
-        min_bands=DETECT_PARAMS["min_bands"],
+        min_bands=int(DETECT_PARAMS["min_bands"]),
     )
 
     if VISUALIZE and plot_path_prefix:
@@ -217,121 +196,75 @@ def run_pipeline(
     return result, templates, r2
 
 
-def sanitize_label(label: str) -> str:
-    return label.replace("/", "_").replace(" ", "_")
-
-
-def collect_runs(category_root: Path) -> list[tuple[str, str, list[Signal]]]:
-    """Return (dataset_name, run_name, signals) entries for a category root."""
-    entries: list[tuple[str, str, list[Signal]]] = []
-    if not category_root.exists():
-        return entries
-
-    for dataset_dir in sorted(category_root.iterdir()):
-        if not dataset_dir.is_dir():
-            continue
-        runs = load_runs(dataset_dir)
-        for run_name, signals in runs.items():
-            entries.append((dataset_dir.name, run_name, signals))
-    return entries
-
-
-def collect_dataset_averages(
-    category_root: Path,
-) -> list[tuple[str, str, list[Signal]]]:
-    """Return (dataset_name, run_name, signals) for per-dataset averages."""
-    entries: list[tuple[str, str, list[Signal]]] = []
-    if not category_root.exists():
-        return entries
-
-    for dataset_dir in sorted(category_root.iterdir()):
-        if not dataset_dir.is_dir():
-            continue
-        all_signals = load_recursive(dataset_dir)
-        if all_signals:
-            entries.append((dataset_dir.name, "AVG", all_signals))
-    return entries
-
-
-def collect_category_average(
-    category_root: Path,
-) -> list[tuple[str, str, list[Signal]]]:
-    """Return (dataset_name, run_name, signals) for the full category average."""
-    if not category_root.exists():
-        return []
-    all_signals = load_recursive(category_root)
-    if not all_signals:
-        return []
-    return [("ALL", "AVG", all_signals)]
-
-
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run Dec 3 mangroves analyses")
-    parser.add_argument(
-        "--category",
-        default="all",
-        choices=["all", "Cut_Leaves", "Dry_Prop", "Super_Dry_Prop"],
-        help="Which category to run",
-    )
-    args = parser.parse_args()
-
     base = Path(__file__).resolve().parent
-    data_root = base / "data" / "mangroves_dec3"
+    data_root = base / "data" / "SandLead"
     lists_dir = base / "data" / "lists"
 
     categories = {
-        "Cut_Leaves": data_root / "Cut_Leaves",
-        "Dry_Prop": data_root / "Dry_Prop",
-        "Super_Dry_Prop": data_root / "Super_Dry_Prop",
+        "FiftyPercent": data_root / "FiftyPercent",
+        "ThirtySevenandaHalf": data_root / "ThirtySevenandaHalf",
     }
-
-    if args.category != "all":
-        categories = {args.category: categories[args.category]}
 
     print("Loading references...")
     references = load_references(lists_dir, element_only=False)
-    species_filter = expand_species_filter(references.lines.keys(), MANGROVE_ELEMENTS)
+    species_filter = expand_species_filter(references.lines.keys(), SANDLEAD_ELEMENTS)
 
     if VISUALIZE:
         PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
     results: list[ResultSummary] = []
+    kept_log: list[tuple[str, int, int]] = []
 
-    for category, category_root in categories.items():
-        entries = collect_runs(category_root)
-        avg_entries = collect_dataset_averages(category_root)
-        category_avg_entries = collect_category_average(category_root)
-        if not entries and not avg_entries:
-            print(f"No measurements found for {category}.")
+    for category, cat_root in categories.items():
+        if not cat_root.exists():
+            print(f"Warning: {category} not found.")
             continue
 
-        print(f"\nProcessing category: {category}")
-        for dataset_name, run_name, signals in (
-            entries + avg_entries + category_avg_entries
-        ):
+        print(f"\nAnalyzing {category}...")
+        samples: dict[str, list[Signal]] = {}
+        for sample_dir in sorted(cat_root.iterdir()):
+            if sample_dir.is_dir():
+                signals = load_recursive(sample_dir)
+                if signals:
+                    samples[sample_dir.name] = signals
+
+        if not samples:
+            print(f"  No samples found for {category}.")
+            continue
+
+        # Add category-level average
+        all_signals: list[Signal] = []
+        for sigs in samples.values():
+            all_signals.extend(sigs)
+        samples_with_avg = dict(samples)
+        if all_signals:
+            samples_with_avg["AVG"] = all_signals
+
+        for sample_name, signals in samples_with_avg.items():
             filtered = filter_degraded_signals(signals)
             if not filtered:
-                print(f"  {dataset_name}/{run_name} has no usable signals after cutoff, skipping.")
+                print(f"  {sample_name} has no usable signals after cutoff, skipping.")
                 continue
             if len(filtered) < len(signals):
                 print(
-                    f"  {dataset_name}/{run_name}: using first {len(filtered)} of "
+                    f"  {sample_name}: using first {len(filtered)} of "
                     f"{len(signals)} shots (degradation cutoff)."
                 )
+            if sample_name != "AVG":
+                kept_log.append(
+                    (f"{category}/{sample_name}", len(signals), len(filtered))
+                )
+
             junk, q_avg = describe_group(filtered)
             if junk:
-                print(
-                    f"  {dataset_name}/{run_name} looks like junk (quality={q_avg:.3f}), "
-                    "skipping."
-                )
+                print(f"  {sample_name} is junk (quality={q_avg:.3f}), skipping.")
                 continue
 
-            print(f"  {dataset_name}/{run_name}...")
-
+            print(f"  Processing {sample_name}...")
             plot_prefix = None
             if VISUALIZE:
-                safe = sanitize_label(run_name)
-                plot_prefix = PLOT_DIR / category / dataset_name / safe
+                plot_prefix = PLOT_DIR / category / sample_name / "no_bg"
                 plot_prefix.parent.mkdir(parents=True, exist_ok=True)
 
             try:
@@ -343,83 +276,60 @@ def main() -> None:
                     plot_path_prefix=plot_prefix,
                 )
             except Exception as exc:
-                print(f"    Error processing {dataset_name}/{run_name}: {exc}")
+                print(f"    Error processing {category} {sample_name}: {exc}")
                 continue
 
             best_fwhm = templates.meta.get("fwhm_search", {}).get("best_fwhm_nm")
             det_species = [d.species for d in detection.detections]
-            det_scores = [(d.species, float(d.score)) for d in detection.detections]
-
-            coeff_map = detection.meta.get("coefficients", {})
-            fve_map = detection.meta.get("per_species_fve", {})
-            top_coeffs = sorted(
-                ((sp, float(c)) for sp, c in coeff_map.items()),
-                key=lambda kv: kv[1],
-                reverse=True,
-            )[:5]
-            top_fve = sorted(
-                ((sp, float(f)) for sp, f in fve_map.items()),
-                key=lambda kv: kv[1],
-                reverse=True,
-            )[:5]
-
-            score_str = (
-                ", ".join(f"{sp} ({sc:.4f})" for sp, sc in det_scores[:5])
-                if det_scores
-                else "none"
-            )
-            fve_str = ", ".join(f"{sp} ({sc:.4f})" for sp, sc in top_fve)
-            coeff_str = ", ".join(f"{sp} ({c:.4f})" for sp, c in top_coeffs)
-
-            print(f"    R^2={r2:.4f}; detections={score_str}")
-            print(f"    top FVE: {fve_str}")
-            print(f"    top coeffs: {coeff_str}")
 
             results.append(
                 ResultSummary(
                     category=category,
-                    dataset_name=dataset_name,
-                    run_name=run_name,
+                    sample_name=sample_name,
+                    bg_name="no_bg",
                     r2=r2,
                     detections=det_species,
-                    detection_scores=det_scores,
-                    top_fve=top_fve,
-                    top_coeffs=top_coeffs,
                     best_fwhm=best_fwhm,
                 )
             )
 
-    if not results:
-        print("No results to summarize.")
-        return
+        # Mark best run per category with BEST prefix plots
+        category_results = [r for r in results if r.category == category]
+        if category_results:
+            best = max(category_results, key=lambda r: r.r2)
+            best_signals = samples_with_avg.get(best.sample_name)
+            if best_signals:
+                filtered = filter_degraded_signals(best_signals)
+                if filtered:
+                    plot_prefix = PLOT_DIR / category / best.sample_name / "no_bg" / "BEST_"
+                    plot_prefix.parent.mkdir(parents=True, exist_ok=True)
+                    run_pipeline(
+                        filtered,
+                        backgrounds=[],
+                        references=references,
+                        species_filter=species_filter,
+                        plot_path_prefix=plot_prefix,
+                    )
 
-    results.sort(key=lambda x: (x.category, x.dataset_name, -x.r2))
+    print("\n" + "=" * 80)
+    print("SUMMARY OF RESULTS")
+    print("=" * 80)
+    print(f"{'Category':<18} | {'Sample':<12} | {'R^2':<8} | Detections")
+    print("-" * 80)
 
-    grouped: dict[tuple[str, str], list[ResultSummary]] = {}
+    results.sort(key=lambda x: x.r2, reverse=True)
     for res in results:
-        grouped.setdefault((res.category, res.dataset_name), []).append(res)
+        det_str = ", ".join(res.detections[:3]) + ("..." if len(res.detections) > 3 else "")
+        print(f"{res.category:<18} | {res.sample_name:<12} | {res.r2:.4f}   | {det_str}")
 
-    for (category, dataset_name), group in grouped.items():
-        print("\n" + "=" * 80)
-        print(f"SUMMARY: {category}/{dataset_name}")
-        print("=" * 80)
-        print(f"{'Run':<18} | {'R^2':<8} | Detections (score)")
-        print("-" * 80)
-        for res in group:
-            det_str = ", ".join(
-                f"{sp} ({sc:.4f})" for sp, sc in res.detection_scores[:3]
-            )
-            if len(res.detection_scores) > 3:
-                det_str += "..."
-            print(f"{res.run_name:<18} | {res.r2:.4f}   | {det_str}")
-        best = max(group, key=lambda x: x.r2)
-        print(
-            f"BEST RUN: {best.category}/{best.dataset_name}/{best.run_name} "
-            f"(R^2={best.r2:.4f})"
-        )
-
-    if VISUALIZE:
-        print("\nPlots saved under plots/mangroves_dec3/<Category>/<Dataset>/<Run>_*.png")
+    if kept_log:
+        kept_path = PLOT_DIR / "kept_runs.txt"
+        kept_path.parent.mkdir(parents=True, exist_ok=True)
+        with kept_path.open("w") as f:
+            f.write("run kept/total\n")
+            for run_name, total, kept in kept_log:
+                f.write(f"{run_name} {kept}/{total}\n")
+        print(f"Wrote kept-run log to {kept_path}")
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ from yrep_spectrum_analysis import (
 from yrep_spectrum_analysis.types import Signal
 from yrep_spectrum_analysis.utils import (
     expand_species_filter,
+    filter_degraded_signals,
     group_signals,
     is_junk_group,
     load_references,
@@ -175,13 +176,22 @@ def main() -> None:
         print(f"   Split into {len(groups)} group(s)")
 
         for gi, group in enumerate(groups, start=1):
-            junk, q_mean, q_avg = describe_group(group)
+            filtered = filter_degraded_signals(group)
+            if not filtered:
+                print(f"   Group {gi}: no usable signals after cutoff; skipping")
+                continue
+            if len(filtered) < len(group):
+                print(
+                    f"   Group {gi}: using first {len(filtered)} of "
+                    f"{len(group)} shots (degradation cutoff)"
+                )
+            junk, q_mean, q_avg = describe_group(filtered)
             print(f"   Group {gi}: junk={junk}; quality_mean={q_mean:.3f}; quality_avg={q_avg:.3f}")
             if junk:
                 print("      Skipping analysis (identified as junk)")
                 continue
 
-            result, history, templates = run_pipeline(group, backgrounds, references, species_filter)
+            result, history, templates = run_pipeline(filtered, backgrounds, references, species_filter)
 
             r2 = result.meta.get("fit_R2", 0.0)
             print(f"      R²={r2:.4f}; detections={len(result.detections)}")
