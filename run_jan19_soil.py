@@ -34,8 +34,8 @@ from yrep_spectrum_analysis.visualizations import (
 
 # Configuration
 VISUALIZE = True
-# When False, only a curated subset is plotted to avoid massive output.
-PLOT_ALL = False
+# When True, plot every run/background (still marks BEST).
+PLOT_ALL = True
 # Number of top results per dataset to plot when PLOT_ALL is False.
 PLOT_TOP_PER_DATASET = 3
 PLOT_DIR = Path(__file__).parent / "plots/jan19_soil"
@@ -235,12 +235,15 @@ def main() -> None:
             if path.is_dir():
                 datasets_with_runs[path.name] = load_runs(path)
 
-    # Backgrounds (KBr runs)
+    # Backgrounds (combine all KBr runs into one averaged background set)
     backgrounds: dict[str, list[Signal]] = {}
     if kbr_dir.exists():
+        kbr_signals: list[Signal] = []
         for path in sorted(kbr_dir.iterdir()):
             if path.is_dir():
-                backgrounds[path.name] = load_recursive(path)
+                kbr_signals.extend(load_recursive(path))
+        if kbr_signals:
+            backgrounds["KBr_All"] = kbr_signals
 
     if VISUALIZE:
         PLOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -255,8 +258,17 @@ def main() -> None:
 
         print(f"\nAnalyzing {ds_name}...")
 
+        # Build run list + dataset-level average
+        runs_items: list[tuple[str, list[Signal]]] = list(runs_dict.items())
+        if "AVG" not in runs_dict:
+            avg_signals: list[Signal] = []
+            for run_signals in runs_dict.values():
+                avg_signals.extend(run_signals)
+            if avg_signals:
+                runs_items.append(("AVG", avg_signals))
+
         # Iterate Runs
-        for run_name, group_signals_list in runs_dict.items():
+        for run_name, group_signals_list in runs_items:
             junk, q_avg = describe_group(group_signals_list)
             if junk:
                 print(f"  {run_name} is junk (quality={q_avg:.3f}), skipping.")
@@ -271,7 +283,8 @@ def main() -> None:
 
                 plot_prefix = None
                 if VISUALIZE and PLOT_ALL:
-                    plot_prefix = PLOT_DIR / f"{ds_name}_{run_name}_{bg_name}"
+                    plot_prefix = PLOT_DIR / ds_name / run_name / bg_name
+                    plot_prefix.parent.mkdir(parents=True, exist_ok=True)
 
                 try:
                     detection, templates, r2 = run_pipeline(
@@ -349,7 +362,8 @@ def main() -> None:
                     best.run_name,
                     best.bg_name,
                 ) else "TOP_"
-                plot_prefix = PLOT_DIR / f"{prefix}{ds_name}_{run_name}_{bg_name}"
+                plot_prefix = PLOT_DIR / ds_name / run_name / bg_name / prefix
+                plot_prefix.parent.mkdir(parents=True, exist_ok=True)
                 run_pipeline(
                     run_signals,
                     bg_signals,
