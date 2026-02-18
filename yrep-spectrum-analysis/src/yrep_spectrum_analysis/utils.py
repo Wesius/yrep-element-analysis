@@ -225,7 +225,7 @@ def filter_degraded_signals(
     drop_fraction: float = 0.6,
     consecutive: int = 3,
     debug: bool = False,
-) -> List[Signal]:
+) -> Tuple[List[Signal], int, int]:
     """
     Keep signals up to the first sustained quality drop, then stop.
 
@@ -235,7 +235,7 @@ def filter_degraded_signals(
     shots in a row, the run is truncated before that point.
     """
     if not signals:
-        return []
+        return [], 0, 0
     ordered = _order_signals_by_file(signals)
     qualities = [signal_quality(s) for s in ordered]
     n = len(qualities)
@@ -269,7 +269,8 @@ def filter_degraded_signals(
             )
         )
 
-    return ordered[:cutoff_idx]
+    filtered = ordered[:cutoff_idx]
+    return filtered, len(filtered), n
 
 
 def is_junk_group(signals: Sequence[Signal], *, debug: bool = False) -> bool:

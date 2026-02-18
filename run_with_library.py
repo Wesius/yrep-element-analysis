@@ -163,6 +163,7 @@ def main() -> None:
     base = Path(__file__).resolve().parent
     lists_dir = base / "data" / "lists"
     references = load_references(lists_dir, element_only=False)
+    kept_log: list[tuple[str, int, int]] = []
 
     species_filter = expand_species_filter(references.lines.keys(), [
         "Na", "K", "Ca", "Li", "Cu", "Ba", "Sr", "Hg", "O", "N", "Al",
@@ -176,15 +177,16 @@ def main() -> None:
         print(f"   Split into {len(groups)} group(s)")
 
         for gi, group in enumerate(groups, start=1):
-            filtered = filter_degraded_signals(group)
+            filtered, kept, total = filter_degraded_signals(group)
             if not filtered:
                 print(f"   Group {gi}: no usable signals after cutoff; skipping")
                 continue
-            if len(filtered) < len(group):
+            if kept < total:
                 print(
-                    f"   Group {gi}: using first {len(filtered)} of "
-                    f"{len(group)} shots (degradation cutoff)"
+                    f"   Group {gi}: using first {kept} of "
+                    f"{total} shots (degradation cutoff)"
                 )
+            kept_log.append((f"{std}/group_{gi:02d}", total, kept))
             junk, q_mean, q_avg = describe_group(filtered)
             print(f"   Group {gi}: junk={junk}; quality_mean={q_mean:.3f}; quality_avg={q_avg:.3f}")
             if junk:
@@ -212,6 +214,15 @@ def main() -> None:
 
             history_dir = base / "plots" / std.lower() / f"group_{gi:02d}" / "pipeline_stages"
             save_stage_history(history, result, templates, history_dir)
+
+    if kept_log:
+        kept_path = base / "plots" / "with_library" / "kept_runs.txt"
+        kept_path.parent.mkdir(parents=True, exist_ok=True)
+        with kept_path.open("w") as f:
+            f.write("run kept/total\n")
+            for run_name, total, kept in kept_log:
+                f.write(f"{run_name} {kept}/{total}\n")
+        print(f"Wrote kept-run log to {kept_path}")
 
 
 if __name__ == "__main__":

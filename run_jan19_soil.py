@@ -275,19 +275,19 @@ def main() -> None:
         # Iterate Runs
         for run_name, group_signals_list in runs_items:
             total_runs += 1
-            filtered = filter_degraded_signals(group_signals_list)
+            filtered, kept, total = filter_degraded_signals(group_signals_list)
             if not filtered:
                 print(f"  {run_name} has no usable signals after cutoff, skipping.")
                 skipped_cutoff += 1
                 continue
-            if len(filtered) < len(group_signals_list):
+            if kept < total:
                 print(
-                    f"  {run_name}: using first {len(filtered)} of "
-                    f"{len(group_signals_list)} shots (degradation cutoff)."
+                    f"  {run_name}: using first {kept} of "
+                    f"{total} shots (degradation cutoff)."
                 )
             if run_name != "AVG":
                 kept_log.append(
-                    (f"{ds_name}/{run_name}", len(group_signals_list), len(filtered))
+                    (f"{ds_name}/{run_name}", total, kept)
                 )
             junk, q_avg = describe_group(filtered)
             if junk:
@@ -377,7 +377,7 @@ def main() -> None:
                 bg_signals = backgrounds.get(bg_name)
                 if not run_signals or not bg_signals:
                     continue
-                filtered = filter_degraded_signals(run_signals)
+                filtered, _, _ = filter_degraded_signals(run_signals)
                 if not filtered:
                     continue
 

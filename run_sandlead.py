@@ -242,18 +242,18 @@ def main() -> None:
             samples_with_avg["AVG"] = all_signals
 
         for sample_name, signals in samples_with_avg.items():
-            filtered = filter_degraded_signals(signals)
+            filtered, kept, total = filter_degraded_signals(signals)
             if not filtered:
                 print(f"  {sample_name} has no usable signals after cutoff, skipping.")
                 continue
-            if len(filtered) < len(signals):
+            if kept < total:
                 print(
-                    f"  {sample_name}: using first {len(filtered)} of "
-                    f"{len(signals)} shots (degradation cutoff)."
+                    f"  {sample_name}: using first {kept} of "
+                    f"{total} shots (degradation cutoff)."
                 )
             if sample_name != "AVG":
                 kept_log.append(
-                    (f"{category}/{sample_name}", len(signals), len(filtered))
+                    (f"{category}/{sample_name}", total, kept)
                 )
 
             junk, q_avg = describe_group(filtered)
@@ -299,7 +299,7 @@ def main() -> None:
             best = max(category_results, key=lambda r: r.r2)
             best_signals = samples_with_avg.get(best.sample_name)
             if best_signals:
-                filtered = filter_degraded_signals(best_signals)
+                filtered, _, _ = filter_degraded_signals(best_signals)
                 if filtered:
                     plot_prefix = PLOT_DIR / category / best.sample_name / "no_bg" / "BEST_"
                     plot_prefix.parent.mkdir(parents=True, exist_ok=True)

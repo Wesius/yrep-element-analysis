@@ -243,6 +243,7 @@ def main() -> None:
         PLOT_DIR.mkdir(parents=True, exist_ok=True)
         
     results: list[ResultSummary] = []
+    kept_log: list[tuple[str, int, int]] = []
     
     # Iterate Datasets
     for ds_name, runs_dict in datasets_with_runs.items():
@@ -254,15 +255,16 @@ def main() -> None:
         
         # Iterate Runs
         for run_name, group_signals_list in runs_dict.items():
-            filtered = filter_degraded_signals(group_signals_list)
+            filtered, kept, total = filter_degraded_signals(group_signals_list)
             if not filtered:
                 print(f"  {run_name} has no usable signals after cutoff, skipping.")
                 continue
-            if len(filtered) < len(group_signals_list):
+            if kept < total:
                 print(
-                    f"  {run_name}: using first {len(filtered)} of "
-                    f"{len(group_signals_list)} shots (degradation cutoff)."
+                    f"  {run_name}: using first {kept} of "
+                    f"{total} shots (degradation cutoff)."
                 )
+            kept_log.append((f"{ds_name}/{run_name}", total, kept))
             # Filter junk
             junk, q_avg = describe_group(filtered)
             if junk:
@@ -335,7 +337,7 @@ def main() -> None:
         best_bg_signals = backgrounds.get(best.bg_name)
 
         if best_run_signals and best_bg_signals:
-            best_filtered = filter_degraded_signals(best_run_signals)
+            best_filtered, _, _ = filter_degraded_signals(best_run_signals)
             if not best_filtered:
                 print("Could not reload data for best run to plot.")
                 return
@@ -350,6 +352,15 @@ def main() -> None:
             print(f"Best run plots saved to {plot_prefix}_*.png")
         else:
             print("Could not reload data for best run to plot.")
+
+    if kept_log:
+        kept_path = PLOT_DIR / "kept_runs.txt"
+        kept_path.parent.mkdir(parents=True, exist_ok=True)
+        with kept_path.open("w") as f:
+            f.write("run kept/total\n")
+            for run_name, total, kept in kept_log:
+                f.write(f"{run_name} {kept}/{total}\n")
+        print(f"Wrote kept-run log to {kept_path}")
 
 if __name__ == "__main__":
     main()

@@ -296,6 +296,7 @@ def main() -> None:
         PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
     results: list[ResultSummary] = []
+    kept_log: list[tuple[str, int, int]] = []
 
     for category, category_root in categories.items():
         entries = collect_runs(category_root)
@@ -309,15 +310,16 @@ def main() -> None:
         for dataset_name, run_name, signals in (
             entries + avg_entries + category_avg_entries
         ):
-            filtered = filter_degraded_signals(signals)
+            filtered, kept, total = filter_degraded_signals(signals)
             if not filtered:
                 print(f"  {dataset_name}/{run_name} has no usable signals after cutoff, skipping.")
                 continue
-            if len(filtered) < len(signals):
+            if kept < total:
                 print(
-                    f"  {dataset_name}/{run_name}: using first {len(filtered)} of "
-                    f"{len(signals)} shots (degradation cutoff)."
+                    f"  {dataset_name}/{run_name}: using first {kept} of "
+                    f"{total} shots (degradation cutoff)."
                 )
+            kept_log.append((f"{category}/{dataset_name}/{run_name}", total, kept))
             junk, q_avg = describe_group(filtered)
             if junk:
                 print(
@@ -420,6 +422,15 @@ def main() -> None:
 
     if VISUALIZE:
         print("\nPlots saved under plots/mangroves_dec3/<Category>/<Dataset>/<Run>_*.png")
+
+    if kept_log:
+        kept_path = PLOT_DIR / "kept_runs.txt"
+        kept_path.parent.mkdir(parents=True, exist_ok=True)
+        with kept_path.open("w") as f:
+            f.write("run kept/total\n")
+            for run_name, total, kept in kept_log:
+                f.write(f"{run_name} {kept}/{total}\n")
+        print(f"Wrote kept-run log to {kept_path}")
 
 
 if __name__ == "__main__":
