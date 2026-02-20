@@ -123,13 +123,24 @@ def run_nnls_analysis(
     )
     if VISUALIZE and plot_path_prefix:
         detected_species = [d.species for d in result.detections]
+        coeff_map = result.meta.get("coefficients", {})
+        top_by_coeff = [
+            sp for sp, _ in sorted(
+                coeff_map.items(),
+                key=lambda kv: abs(float(kv[1])),
+                reverse=True,
+            )
+        ][:10]
+        overlay_species = detected_species + [
+            sp for sp in top_by_coeff if sp not in detected_species
+        ]
         visualize_templates(
             signal=processed,
             templates=templates,
             title="Optimized Templates",
             save_path=str(plot_path_prefix) + "_templates.png",
             show=False,
-            species_subset=detected_species,
+            species_subset=overlay_species,
         )
     if VISUALIZE and plot_path_prefix:
         visualize_detection(
