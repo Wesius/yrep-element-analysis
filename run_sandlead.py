@@ -176,13 +176,24 @@ def run_pipeline(
 
     if VISUALIZE and plot_path_prefix:
         detected_species = [d.species for d in result.detections]
+        coeff_map = result.meta.get("coefficients", {})
+        top_by_coeff = [
+            sp for sp, _ in sorted(
+                coeff_map.items(),
+                key=lambda kv: abs(float(kv[1])),
+                reverse=True,
+            )
+        ][:10]
+        overlay_species = detected_species + [
+            sp for sp in top_by_coeff if sp not in detected_species
+        ]
         visualize_templates(
             signal=processed,
             templates=templates,
             title="Optimized Templates",
             save_path=str(plot_path_prefix) + "_templates.png",
             show=False,
-            species_subset=detected_species,
+            species_subset=overlay_species,
         )
 
     if VISUALIZE and plot_path_prefix:
@@ -204,8 +215,9 @@ def main() -> None:
     lists_dir = base / "data" / "lists"
 
     categories = {
-        "FiftyPercent": data_root / "FiftyPercent",
-        "ThirtySevenandaHalf": data_root / "ThirtySevenandaHalf",
+        path.name: path
+        for path in sorted(data_root.iterdir())
+        if path.is_dir()
     }
 
     print("Loading references...")
@@ -225,11 +237,16 @@ def main() -> None:
 
         print(f"\nAnalyzing {category}...")
         samples: dict[str, list[Signal]] = {}
-        for sample_dir in sorted(cat_root.iterdir()):
-            if sample_dir.is_dir():
+        subdirs = [p for p in sorted(cat_root.iterdir()) if p.is_dir()]
+        if subdirs:
+            for sample_dir in subdirs:
                 signals = load_recursive(sample_dir)
                 if signals:
                     samples[sample_dir.name] = signals
+        else:
+            signals = load_recursive(cat_root)
+            if signals:
+                samples[cat_root.name] = signals
 
         if not samples:
             print(f"  No samples found for {category}.")
@@ -265,7 +282,7 @@ def main() -> None:
             print(f"  Processing {sample_name}...")
             plot_prefix = None
             if VISUALIZE:
-                plot_prefix = PLOT_DIR / category / sample_name / "no_bg"
+                plot_prefix = PLOT_DIR / category / sample_name / sample_name
                 plot_prefix.parent.mkdir(parents=True, exist_ok=True)
 
             try:
@@ -294,21 +311,7 @@ def main() -> None:
                 )
             )
 
-        # Mark best run per category with BEST prefix plots
-        category_results = [r for r in results if r.category == category]
-        if category_results:
-            best = max(category_results, key=lambda r: r.r2)
-            best_signals = samples_with_avg.get(best.sample_name)
-            if best_signals:
-                plot_prefix = PLOT_DIR / category / best.sample_name / "no_bg" / "BEST_"
-                plot_prefix.parent.mkdir(parents=True, exist_ok=True)
-                run_pipeline(
-                    best_signals,
-                    backgrounds=[],
-                    references=references,
-                    species_filter=species_filter,
-                    plot_path_prefix=plot_prefix,
-                )
+        # No duplicate BEST plots; keep one set per run.
 
     print("\n" + "=" * 80)
     print("SUMMARY OF RESULTS")
