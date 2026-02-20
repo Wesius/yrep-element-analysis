@@ -181,15 +181,6 @@ def run_pipeline(
             species_filter=species_filter,
         )
 
-    if VISUALIZE and plot_path_prefix:
-        visualize_templates(
-            signal=processed,
-            templates=templates,
-            title="Optimized Templates",
-            save_path=str(plot_path_prefix) + "_templates.png",
-            show=False,
-        )
-
     processed = shift_search(
         processed,
         templates,
@@ -203,6 +194,17 @@ def run_pipeline(
         presence_threshold=DETECT_PARAMS["presence_threshold"],
         min_bands=DETECT_PARAMS["min_bands"],
     )
+
+    if VISUALIZE and plot_path_prefix:
+        detected_species = [d.species for d in result.detections]
+        visualize_templates(
+            signal=processed,
+            templates=templates,
+            title="Optimized Templates",
+            save_path=str(plot_path_prefix) + "_templates.png",
+            show=False,
+            species_subset=detected_species,
+        )
 
     if VISUALIZE and plot_path_prefix:
         visualize_detection(
@@ -221,9 +223,9 @@ def sanitize_label(label: str) -> str:
     return label.replace("/", "_").replace(" ", "_")
 
 
-def collect_runs(category_root: Path) -> list[tuple[str, str, list[Signal]]]:
-    """Return (dataset_name, run_name, signals) entries for a category root."""
-    entries: list[tuple[str, str, list[Signal]]] = []
+def collect_run_entries(category_root: Path) -> list[tuple[str, str, list[Signal], int, int]]:
+    """Return (dataset_name, run_name, signals, kept, total) for runs."""
+    entries: list[tuple[str, str, list[Signal], int, int]] = []
     if not category_root.exists():
         return entries
 
@@ -232,37 +234,11 @@ def collect_runs(category_root: Path) -> list[tuple[str, str, list[Signal]]]:
             continue
         runs = load_runs(dataset_dir)
         for run_name, signals in runs.items():
-            entries.append((dataset_dir.name, run_name, signals))
+            filtered, kept, total = filter_degraded_signals(signals)
+            if not filtered:
+                continue
+            entries.append((dataset_dir.name, run_name, filtered, kept, total))
     return entries
-
-
-def collect_dataset_averages(
-    category_root: Path,
-) -> list[tuple[str, str, list[Signal]]]:
-    """Return (dataset_name, run_name, signals) for per-dataset averages."""
-    entries: list[tuple[str, str, list[Signal]]] = []
-    if not category_root.exists():
-        return entries
-
-    for dataset_dir in sorted(category_root.iterdir()):
-        if not dataset_dir.is_dir():
-            continue
-        all_signals = load_recursive(dataset_dir)
-        if all_signals:
-            entries.append((dataset_dir.name, "AVG", all_signals))
-    return entries
-
-
-def collect_category_average(
-    category_root: Path,
-) -> list[tuple[str, str, list[Signal]]]:
-    """Return (dataset_name, run_name, signals) for the full category average."""
-    if not category_root.exists():
-        return []
-    all_signals = load_recursive(category_root)
-    if not all_signals:
-        return []
-    return [("ALL", "AVG", all_signals)]
 
 
 def main() -> None:
@@ -299,28 +275,52 @@ def main() -> None:
     kept_log: list[tuple[str, int, int]] = []
 
     for category, category_root in categories.items():
-        entries = collect_runs(category_root)
-        avg_entries = collect_dataset_averages(category_root)
-        category_avg_entries = collect_category_average(category_root)
-        if not entries and not avg_entries:
+        run_entries = collect_run_entries(category_root)
+        if not run_entries:
             print(f"No measurements found for {category}.")
             continue
 
         print(f"\nProcessing category: {category}")
-        for dataset_name, run_name, signals in (
-            entries + avg_entries + category_avg_entries
-        ):
-            filtered, kept, total = filter_degraded_signals(signals)
-            if not filtered:
-                print(f"  {dataset_name}/{run_name} has no usable signals after cutoff, skipping.")
-                continue
-            if kept < total:
+
+        by_dataset: dict[str, list[tuple[str, list[Signal], int, int]]] = {}
+        for dataset_name, run_name, signals, kept, total in run_entries:
+            by_dataset.setdefault(dataset_name, []).append(
+                (run_name, signals, kept, total)
+            )
+
+        entries: list[tuple[str, str, list[Signal], int, int]] = []
+        for dataset_name, runs in by_dataset.items():
+            for run_name, signals, kept, total in runs:
+                entries.append((dataset_name, run_name, signals, kept, total))
+            avg_signals: list[Signal] = []
+            avg_kept = 0
+            avg_total = 0
+            for _, signals, kept, total in runs:
+                avg_signals.extend(signals)
+                avg_kept += kept
+                avg_total += total
+            if avg_signals:
+                entries.append((dataset_name, "AVG", avg_signals, avg_kept, avg_total))
+
+        cat_signals: list[Signal] = []
+        cat_kept = 0
+        cat_total = 0
+        for _, _, signals, kept, total in run_entries:
+            cat_signals.extend(signals)
+            cat_kept += kept
+            cat_total += total
+        if cat_signals:
+            entries.append(("ALL", "AVG", cat_signals, cat_kept, cat_total))
+
+        for dataset_name, run_name, signals, kept, total in entries:
+            if run_name != "AVG" and kept < total:
                 print(
                     f"  {dataset_name}/{run_name}: using first {kept} of "
                     f"{total} shots (degradation cutoff)."
                 )
-            kept_log.append((f"{category}/{dataset_name}/{run_name}", total, kept))
-            junk, q_avg = describe_group(filtered)
+            if run_name != "AVG":
+                kept_log.append((f"{category}/{dataset_name}/{run_name}", total, kept))
+            junk, q_avg = describe_group(signals)
             if junk:
                 print(
                     f"  {dataset_name}/{run_name} looks like junk (quality={q_avg:.3f}), "
@@ -338,7 +338,7 @@ def main() -> None:
 
             try:
                 detection, templates, r2 = run_pipeline(
-                    filtered,
+                    signals,
                     backgrounds=[],
                     references=references,
                     species_filter=species_filter,

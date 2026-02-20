@@ -178,15 +178,6 @@ def run_pipeline(
         species_filter=species_filter,
     )
     
-    if VISUALIZE and plot_path_prefix:
-        visualize_templates(
-            signal=processed,
-            templates=templates,
-            title="Optimized Templates",
-            save_path=str(plot_path_prefix) + "_templates.png",
-            show=False,
-        )
-
     # 3. Detection
     processed = shift_search(
         processed,
@@ -201,6 +192,17 @@ def run_pipeline(
         min_bands=int(DETECT_PARAMS["min_bands"]),
     )
     
+    if VISUALIZE and plot_path_prefix:
+        detected_species = [d.species for d in result.detections]
+        visualize_templates(
+            signal=processed,
+            templates=templates,
+            title="Optimized Templates",
+            save_path=str(plot_path_prefix) + "_templates.png",
+            show=False,
+            species_subset=detected_species,
+        )
+
     if VISUALIZE and plot_path_prefix:
         visualize_detection(
             result=result,

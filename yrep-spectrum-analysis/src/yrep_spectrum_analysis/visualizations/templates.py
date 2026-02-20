@@ -13,6 +13,7 @@ def visualize_templates(
     save_path: Optional[str] = None,
     show: bool = True,
     max_species: int = 10,
+    species_subset: Optional[list[str]] = None,
 ) -> None:
     """
     Visualize the generated templates against the signal.
@@ -25,6 +26,8 @@ def visualize_templates(
         save_path: Path to save the plot.
         show: Whether to show the plot.
         max_species: Maximum number of species templates to overlay.
+        species_subset: Optional ordered list of species to overlay. When provided,
+            only these species are plotted (up to max_species).
     """
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -40,16 +43,22 @@ def visualize_templates(
 
     # Plot templates
     # Templates matrix is (n_points, n_species)
-    n_species = len(templates.species)
-    limit = min(n_species, max_species)
+    if species_subset is not None:
+        index_map = {name: idx for idx, name in enumerate(templates.species)}
+        indices = [index_map[name] for name in species_subset if name in index_map]
+    else:
+        indices = list(range(len(templates.species)))
+
+    limit = min(len(indices), max_species)
     
     # Create a color cycle
     cmap = plt.colormaps.get_cmap("tab10")
     colors = cmap(np.linspace(0, 1, limit))
 
     for i in range(limit):
-        species_name = templates.species[i]
-        tpl_spectrum = templates.matrix[:, i]
+        species_idx = indices[i]
+        species_name = templates.species[species_idx]
+        tpl_spectrum = templates.matrix[:, species_idx]
         
         # Scale template for visibility if needed, 
         # but usually they are normalized. 

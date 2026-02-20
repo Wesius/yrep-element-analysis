@@ -161,15 +161,6 @@ def run_pipeline(
             species_filter=species_filter,
         )
 
-    if VISUALIZE and plot_path_prefix:
-        visualize_templates(
-            signal=processed,
-            templates=templates,
-            title="Optimized Templates",
-            save_path=str(plot_path_prefix) + "_templates.png",
-            show=False,
-        )
-
     processed = shift_search(
         processed,
         templates,
@@ -182,6 +173,17 @@ def run_pipeline(
         presence_threshold=DETECT_PARAMS["presence_threshold"],
         min_bands=int(DETECT_PARAMS["min_bands"]),
     )
+
+    if VISUALIZE and plot_path_prefix:
+        detected_species = [d.species for d in result.detections]
+        visualize_templates(
+            signal=processed,
+            templates=templates,
+            title="Optimized Templates",
+            save_path=str(plot_path_prefix) + "_templates.png",
+            show=False,
+            species_subset=detected_species,
+        )
 
     if VISUALIZE and plot_path_prefix:
         visualize_detection(
@@ -233,15 +235,8 @@ def main() -> None:
             print(f"  No samples found for {category}.")
             continue
 
-        # Add category-level average
-        all_signals: list[Signal] = []
-        for sigs in samples.values():
-            all_signals.extend(sigs)
-        samples_with_avg = dict(samples)
-        if all_signals:
-            samples_with_avg["AVG"] = all_signals
-
-        for sample_name, signals in samples_with_avg.items():
+        filtered_samples: dict[str, list[Signal]] = {}
+        for sample_name, signals in samples.items():
             filtered, kept, total = filter_degraded_signals(signals)
             if not filtered:
                 print(f"  {sample_name} has no usable signals after cutoff, skipping.")
@@ -251,12 +246,18 @@ def main() -> None:
                     f"  {sample_name}: using first {kept} of "
                     f"{total} shots (degradation cutoff)."
                 )
-            if sample_name != "AVG":
-                kept_log.append(
-                    (f"{category}/{sample_name}", total, kept)
-                )
+            kept_log.append((f"{category}/{sample_name}", total, kept))
+            filtered_samples[sample_name] = filtered
 
-            junk, q_avg = describe_group(filtered)
+        samples_with_avg = dict(filtered_samples)
+        avg_signals: list[Signal] = []
+        for signals in filtered_samples.values():
+            avg_signals.extend(signals)
+        if avg_signals:
+            samples_with_avg["AVG"] = avg_signals
+
+        for sample_name, signals in samples_with_avg.items():
+            junk, q_avg = describe_group(signals)
             if junk:
                 print(f"  {sample_name} is junk (quality={q_avg:.3f}), skipping.")
                 continue
@@ -269,7 +270,7 @@ def main() -> None:
 
             try:
                 detection, templates, r2 = run_pipeline(
-                    filtered,
+                    signals,
                     backgrounds=[],
                     references=references,
                     species_filter=species_filter,
@@ -299,17 +300,15 @@ def main() -> None:
             best = max(category_results, key=lambda r: r.r2)
             best_signals = samples_with_avg.get(best.sample_name)
             if best_signals:
-                filtered, _, _ = filter_degraded_signals(best_signals)
-                if filtered:
-                    plot_prefix = PLOT_DIR / category / best.sample_name / "no_bg" / "BEST_"
-                    plot_prefix.parent.mkdir(parents=True, exist_ok=True)
-                    run_pipeline(
-                        filtered,
-                        backgrounds=[],
-                        references=references,
-                        species_filter=species_filter,
-                        plot_path_prefix=plot_prefix,
-                    )
+                plot_prefix = PLOT_DIR / category / best.sample_name / "no_bg" / "BEST_"
+                plot_prefix.parent.mkdir(parents=True, exist_ok=True)
+                run_pipeline(
+                    best_signals,
+                    backgrounds=[],
+                    references=references,
+                    species_filter=species_filter,
+                    plot_path_prefix=plot_prefix,
+                )
 
     print("\n" + "=" * 80)
     print("SUMMARY OF RESULTS")

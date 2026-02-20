@@ -181,15 +181,6 @@ def run_pipeline(
         species_filter=species_filter,
     )
 
-    if VISUALIZE and plot_path_prefix:
-        visualize_templates(
-            signal=processed,
-            templates=templates,
-            title="Optimized Templates",
-            save_path=str(plot_path_prefix) + "_templates.png",
-            show=False,
-        )
-
     processed = shift_search(
         processed,
         templates,
@@ -202,6 +193,17 @@ def run_pipeline(
         presence_threshold=DETECT_PARAMS["presence_threshold"],
         min_bands=int(DETECT_PARAMS["min_bands"]),
     )
+
+    if VISUALIZE and plot_path_prefix:
+        detected_species = [d.species for d in result.detections]
+        visualize_templates(
+            signal=processed,
+            templates=templates,
+            title="Optimized Templates",
+            save_path=str(plot_path_prefix) + "_templates.png",
+            show=False,
+            species_subset=detected_species,
+        )
 
     if VISUALIZE and plot_path_prefix:
         visualize_detection(
@@ -263,19 +265,11 @@ def main() -> None:
 
         print(f"\nAnalyzing {ds_name}...")
 
-        # Build run list + dataset-level average
-        runs_items: list[tuple[str, list[Signal]]] = list(runs_dict.items())
-        if "AVG" not in runs_dict:
-            avg_signals: list[Signal] = []
-            for run_signals in runs_dict.values():
-                avg_signals.extend(run_signals)
-            if avg_signals:
-                runs_items.append(("AVG", avg_signals))
-
-        # Iterate Runs
-        for run_name, group_signals_list in runs_items:
+        # Build run list + dataset-level average from per-run filtered signals
+        filtered_runs: list[tuple[str, list[Signal], int, int]] = []
+        for run_name, run_signals in runs_dict.items():
             total_runs += 1
-            filtered, kept, total = filter_degraded_signals(group_signals_list)
+            filtered, kept, total = filter_degraded_signals(run_signals)
             if not filtered:
                 print(f"  {run_name} has no usable signals after cutoff, skipping.")
                 skipped_cutoff += 1
@@ -285,11 +279,22 @@ def main() -> None:
                     f"  {run_name}: using first {kept} of "
                     f"{total} shots (degradation cutoff)."
                 )
-            if run_name != "AVG":
-                kept_log.append(
-                    (f"{ds_name}/{run_name}", total, kept)
-                )
-            junk, q_avg = describe_group(filtered)
+            kept_log.append((f"{ds_name}/{run_name}", total, kept))
+            filtered_runs.append((run_name, filtered, kept, total))
+
+        avg_signals: list[Signal] = []
+        for _, run_signals, _, _ in filtered_runs:
+            avg_signals.extend(run_signals)
+
+        runs_items: list[tuple[str, list[Signal]]] = [
+            (run_name, run_signals) for run_name, run_signals, _, _ in filtered_runs
+        ]
+        if avg_signals:
+            runs_items.append(("AVG", avg_signals))
+
+        # Iterate Runs
+        for run_name, group_signals_list in runs_items:
+            junk, q_avg = describe_group(group_signals_list)
             if junk:
                 print(f"  {run_name} is junk (quality={q_avg:.3f}), skipping.")
                 skipped_junk += 1
@@ -309,7 +314,7 @@ def main() -> None:
 
                 try:
                     detection, templates, r2 = run_pipeline(
-                        filtered,
+                        group_signals_list,
                         bg_files,
                         references,
                         species_filter,

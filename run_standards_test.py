@@ -114,15 +114,6 @@ def run_nnls_analysis(
         iterations=3,
         species_filter=species_filter,
     )
-    if VISUALIZE and plot_path_prefix:
-        visualize_templates(
-            signal=processed,
-            templates=templates,
-            title="Optimized Templates",
-            save_path=str(plot_path_prefix) + "_templates.png",
-            show=False,
-        )
-
     processed = shift_search(processed, templates, spread_nm=0.5, iterations=3)
     result = detect_nnls(
         processed,
@@ -130,6 +121,16 @@ def run_nnls_analysis(
         presence_threshold=DETECT_PARAMS["presence_threshold"],
         min_bands=int(DETECT_PARAMS["min_bands"]),
     )
+    if VISUALIZE and plot_path_prefix:
+        detected_species = [d.species for d in result.detections]
+        visualize_templates(
+            signal=processed,
+            templates=templates,
+            title="Optimized Templates",
+            save_path=str(plot_path_prefix) + "_templates.png",
+            show=False,
+            species_subset=detected_species,
+        )
     if VISUALIZE and plot_path_prefix:
         visualize_detection(
             result=result,
